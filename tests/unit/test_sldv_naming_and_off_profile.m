@@ -13,6 +13,16 @@ verifyEqual(testCase, st_scenario_name('Controller', 999), ...
 end
 
 
+function testScenarioNameSanitizesInvalidIdentifierCharacters(testCase)
+% A literal '/' is valid inside a Simulink block name (e.g. 'AC/DC') but
+% must not break the generated MATLAB-identifier scenario name.
+verifyEqual(testCase, st_scenario_name('AC/DC', 1), ...
+    'UT_REQ_AC_DC_001');
+verifyEqual(testCase, st_scenario_name('Motor Speed-1', 3), ...
+    'UT_REQ_Motor_Speed_1_003');
+end
+
+
 function testScenarioIndexValidation(testCase)
 didThrow = false;
 try
