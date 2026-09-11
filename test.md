@@ -1,26 +1,19 @@
-그 창에는 `.mat`으로 바로 내보내는 옵션이 없어요. 대신 이렇게 2단계로 하시면 됩니다.
+`Simulink.io.MatFile`로 내보내신 거 맞습니다, 그걸로 하시면 됩니다 (이전에 알려드린 2단계 방법은 이제 안 하셔도 돼요).
 
-## 1. 내보내기 창에서
+## 지금 계속 에러 나는 이유
 
-"내보낼 파일 선택" 목록에서 **`Simulink.io.BaseWorkspace`** 선택하고 확인 누르세요.
-→ 지금 체크된 `UT_REQ_SetDT...` 신호(DataSet 형식)가 MATLAB 작업 공간에 변수로 생깁니다.
+어떤 방법으로 만들든, Signal Editor에서 내보낸 `.mat` 파일은 **SLDV 전용 형식이 아닙니다.** 그래서 엑셀에서 "이 파일은 SLDV 형식이 아니라 일반 Dataset 형식이야"라고 알려주는 설정을 **반드시** 같이 해주셔야 합니다. 이걸 안 하셔서 계속 같은 에러가 나는 거예요.
 
-## 2. MATLAB Command Window에서
+## 확인/수정해주세요
 
-방금 생긴 변수 이름을 확인하세요.
+`TestManagement.xlsx` → `Targets` 시트 → 37번 행에 `DataFileFormat`이라는 열이 있는지 확인해주세요.
+
+- **열이 없으면**: 새 열을 추가하고 37번 행에 `MAT`이라고 입력
+- **열은 있는데 비어있으면**: 37번 행 칸에 `MAT`이라고 입력
+- **이미 `MAT`이라고 써있으면**: 캡처해서 보여주세요 (다른 원인일 수 있음)
+
+수정하신 뒤 다시 STEP1부터 돌려주세요.
 
 ```matlab
-who
+st_run_standalone_coverage_pipeline('RunMode','STEP1','PreparationMode','FORCE')
 ```
-
-목록에서 `UT_REQ_SetDTCFIMEnable...`로 시작하는 변수 이름을 찾은 뒤, 그 이름을 아래에 그대로 넣어서 저장하세요. (아래 `실제변수명` 자리를 바꿔서 입력)
-
-```matlab
-save('result\sldv\37_SetDTCFIMEnable\SetDTCFIMEnable0_sldvdata2.mat', '실제변수명')
-```
-
-## 3. 엑셀에서
-
-37번 행의 `DataFileFormat` 열을 `MAT`으로 설정해주세요. (없으면 열을 추가하시면 됩니다.)
-
-다 하신 뒤 `who` 결과랑 실제 저장한 변수명 알려주시면 확인해드릴게요.
