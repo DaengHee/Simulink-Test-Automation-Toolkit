@@ -1,11 +1,9 @@
-SLDV 매니페스트가 오래돼서 마지막 타겟(35/35)에서 실패했습니다. STEP1을 강제로 다시 돌려서 매니페스트부터 갱신해주세요.
+SLDV 데이터 준비 단계에서 실패했습니다. 정확한 원인을 봐야 합니다.
 
-```matlab
-st_run_standalone_coverage_pipeline('RunMode','STEP1','PreparationMode','FORCE')
+MATLAB 명령 안 치셔도 됩니다. 탐색기로 이 파일만 열어주세요.
+
+```
+result\reports\SldvGenerationResult.ini
 ```
 
-끝나면 이어서 실행:
-
-```matlab
-info = st_run_standalone_coverage_pipeline('RunMode','STEP2_TO_6')
-```
+메모장으로 열어서 `Status=FAIL`인 줄 찾고, 바로 밑 `Message=...` 줄 내용 캡처해서 보내주세요.
