@@ -1,20 +1,17 @@
-37번 행(SetDTCFIMEnable)의 `SldvDataFile` 셀이 잘못된 파일을 가리키고 있습니다.
+엑셀 `SldvDataFile`을 고치셨으니, STEP1을 다시 강제로 돌려서 매니페스트부터 갱신해주세요. (엑셀 값을 바꿀 때마다 매번 STEP1을 다시 돌려야 합니다.)
 
-지금 가리키는 파일: `...\result\sldv\37_SetDTCFIMEnable\SetDTCFIMEnable0_sldvdata1.xlsx`
-→ 확장자가 `.xlsx`인데, 이 항목은 `.mat` 파일만 지원합니다. 실제 존재하는 파일이 아닙니다.
-
-## 해야 할 것
-
-1. 탐색기로 이 폴더 열기:
-   ```
-   result\sldv\37_SetDTCFIMEnable\
-   ```
-2. 그 안에 실제로 있는 `.mat` 파일 이름 확인 (예: `SetDTCFIMEnable0_sldvdata2.mat` 같은 것)
-3. `TestManagement.xlsx` → `Targets` 시트 → 37번 행의 `SldvDataFile` 셀을 그 **실제 파일명**으로 수정
-
-앞서 확인했던 것처럼 상대경로면 맨 앞에 `\` 없이, `TestManagement.xlsx` 기준으로 씁니다:
-```
-result\sldv\37_SetDTCFIMEnable\{실제파일명}.mat
+```matlab
+st_run_standalone_coverage_pipeline('RunMode','STEP1','PreparationMode','FORCE')
 ```
 
-수정하신 뒤, 그 폴더에 실제로 어떤 파일들이 있는지 캡처해서 보여주시면 정확한 파일명 확인해드릴게요.
+성공하면 이어서:
+
+```matlab
+info = st_run_standalone_coverage_pipeline('RunMode','STEP2_TO_6')
+```
+
+STEP1에서도 실패하면, 아까처럼 이 파일 열어서 `Status=FAIL` 줄의 `Message` 내용 보내주세요.
+
+```
+result\reports\SldvGenerationResult.ini
+```
