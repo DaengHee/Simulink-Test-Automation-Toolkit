@@ -1,13 +1,26 @@
-그 `.mat` 파일 안에 실제로 뭐가 들어있는지 확인해주세요.
+그 창에는 `.mat`으로 바로 내보내는 옵션이 없어요. 대신 이렇게 2단계로 하시면 됩니다.
+
+## 1. 내보내기 창에서
+
+"내보낼 파일 선택" 목록에서 **`Simulink.io.BaseWorkspace`** 선택하고 확인 누르세요.
+→ 지금 체크된 `UT_REQ_SetDT...` 신호(DataSet 형식)가 MATLAB 작업 공간에 변수로 생깁니다.
+
+## 2. MATLAB Command Window에서
+
+방금 생긴 변수 이름을 확인하세요.
 
 ```matlab
-whos('-file', 'result\sldv\37_SetDTCFIMEnable\SetDTCFIMEnable0_sldvdata2.mat')
+who
 ```
 
-결과로 나오는 변수 이름(Name)과 타입(Class) 목록을 보내주세요.
+목록에서 `UT_REQ_SetDTCFIMEnable...`로 시작하는 변수 이름을 찾은 뒤, 그 이름을 아래에 그대로 넣어서 저장하세요. (아래 `실제변수명` 자리를 바꿔서 입력)
 
-## 왜 이걸 확인하는지
+```matlab
+save('result\sldv\37_SetDTCFIMEnable\SetDTCFIMEnable0_sldvdata2.mat', '실제변수명')
+```
 
-`SldvDataFile`은 기본적으로 SLDV 전용 형식(`sldvData`라는 이름의 특정 구조체)을 기대합니다. 지금 파일은 그 형식이 아닌 것 같아요.
+## 3. 엑셀에서
 
-만약 이 파일이 `Simulink.SimulationData.Dataset` 타입 변수를 담고 있다면(SLDV가 아니라 일반 MAT Dataset이라면), 엑셀에서 이 행의 `DataFileFormat` 열을 `MAT`으로 설정하면 될 수 있습니다. `whos` 결과 보내주시면 정확히 알려드릴게요.
+37번 행의 `DataFileFormat` 열을 `MAT`으로 설정해주세요. (없으면 열을 추가하시면 됩니다.)
+
+다 하신 뒤 `who` 결과랑 실제 저장한 변수명 알려주시면 확인해드릴게요.
