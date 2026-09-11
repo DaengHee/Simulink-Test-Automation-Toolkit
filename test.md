@@ -1,13 +1,12 @@
-원인 찾았고 코드 수정 완료했습니다. `dev` 브랜치에 있어요 (`test`엔 없음).
+수정 완료했습니다. `test` 브랜치에 반영됐어요.
 
-1. `dev` 브랜치로 전환하고 최신으로 받기
+1. 최신 받기
 
 ```bash
-git checkout dev
 git pull
 ```
 
-2. MATLAB에서 다시 설정하고 재실행
+2. MATLAB에서 재실행
 
 ```matlab
 st_setup
