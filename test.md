@@ -1,9 +1,17 @@
-이거 실행하고 결과 보내주세요. `{CUT_NAME}`은 실제 이름으로 바꿔서 치세요.
+원인 찾았고 코드 수정 완료했습니다. `dev` 브랜치에 있어요 (`test`엔 없음).
 
-```matlab
-sfunBlocks = find_system(cutPath, 'SearchDepth', 1, 'BlockType', 'S-Function');
-get_param(sfunBlocks, 'FunctionName')
+1. `dev` 브랜치로 전환하고 최신으로 받기
+
+```bash
+git checkout dev
+git pull
 ```
 
-(`cutPath` 변수는 아까 실행한 세션에 이미 있을 겁니다. 없으면 이거 먼저 치세요:
-`cutPath = getfullname(handles(1));`)
+2. MATLAB에서 다시 설정하고 재실행
+
+```matlab
+st_setup
+st_run_standalone_coverage_pipeline('RunMode','STEP2_TO_6')
+```
+
+전에 났던 `Missing dependencies: {CUT_NAME}` 에러 없이 넘어가는지 확인해주세요.
