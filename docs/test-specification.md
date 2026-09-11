@@ -32,6 +32,15 @@ ActiveX는 필요 없다. 기존 `cfg.OnlyEnabled`, 관리 엑셀 및 `cfg.TestS
 Assessment 시나리오도 남기고 `연결 없음`으로 표시한다. 동적 IterationScript는
 평가하지 않으며 연결을 확인할 수 없다는 사유를 남긴다.
 
+입력 시나리오 추출 여부는 CUT의 직계 Inport 수가 아니라 Harness의 Signal Editor와
+실제 Test Manager 연결로 판단한다. 따라서 `SldvMode=OFF`이고 직계 Inport가 없어도
+Signal Editor가 존재하고 TC에 시나리오가 연결되어 있으면 input 파일명,
+`InputScenario명`과 저장된 Dataset 내용을 출력한다. OFF 대상에 Signal Editor 블록
+자체가 없을 때만 `해당 없음`과 `SKIP_NO_SIGNAL_EDITOR` WARN을 기록한다. 그 외
+중복 블록, 잘못된 ActiveScenario 또는 읽을 수 없는 MAT 구성은 해당 대상을 FAIL로
+기록하고 다음 대상의 추출은 계속한다. no-Inport OFF 시나리오의 Dataset이 정상적으로
+비어 있으면 시나리오 연결은 유지하고 input 내용에는 `<입력 신호 없음>`을 기록한다.
+
 처음 7개 열은 테스트 케이스명, 대상 모델명(CUTName), 하네스명, 하네스 input 파일명,
 Test Sequence scenario 명, input 시나리오 내용, verify 내용이다. 그 뒤에 TopModel,
 CUTPath, DecisionBlocks, Iteration명, InputScenario명, MaxTime, 추출상태, 비고가 붙는다. 전체 스텝 모드에서는
@@ -40,35 +49,41 @@ CUTPath, DecisionBlocks, Iteration명, InputScenario명, MaxTime, 추출상태, 
 
 `MaxTime`의 기준은 테스트 데이터 생성 방식에 따라 다르다. `SldvMode=FILE` 또는
 `GENERATE`이면 연결된 TC 입력 시나리오의 모든 신호에 저장된 시간 중 최댓값(Tmax)을
-초 단위 숫자로 기록한다. `SldvMode=OFF`인 기본 생성 하네스와 가져온 하네스는 입력
+초 단위 숫자로 기록한다. `SldvMode=OFF` 대상은 입력 시나리오가 연결되어 있어도 입력
 시간을 사용하지 않고 해당 Harness의 Solver `StopTime`을 기록한다. verify 실행 시간은
 어느 모드에서도 사용하지 않는다.
 
-SLDV 입력이 없거나 연결/시간을 확인할 수 없으면 Excel에서는 빈 셀, 반환 table에서는
+FILE/GENERATE 입력이 없거나 연결/시간을 확인할 수 없으면 Excel에서는 빈 셀, 반환 table에서는
 NaN이며 비고를 남긴다. 시간을 가진 SLDV 입력을 읽었지만 시간 단위를 변환할 수 없는
 경우에도 동일하다. 절대 datetime은 임의의 시작 시각을 정해 초로 변환하지 않는다.
 Harness `StopTime`이 숫자로 직접 해석되지 않거나 유한한 0 이상 값이 아니면 NaN과
 비고를 기록한다.
 
 `DecisionBlocks`는 CUT 바로 아래(`SearchDepth=1`)에서 정적으로 찾은 `If`, `MinMax`, `Switch`,
-`MultiPortSwitch`, `SwitchCase` 블록을 사람이 바로 읽을 수 있도록 `D번호 실제 블록 Name`
-형식으로 한 줄씩 기록한다. Path, BlockType 순으로 정렬하고 중복을 제거하며 빈 목록은
-빈 셀이다. 예를 들어 블록 이름이 `Switch`, `Switch2`, `If (a==1)`이면 메인 시트에는
-다음처럼 표시된다.
+`MultiPortSwitch`, `SwitchCase` 블록을 블록마다 이름 한 줄과
+`D번호 [분기종류]블록유형 (저장된 조건/선택 설정)` 한 줄로 표시한다. Path, BlockType
+순으로 정렬하고 중복을 제거하며 빈 목록은 빈 셀이다. 예를 들면 다음과 같다.
 
 ```text
-D1 Switch
-D2 Switch2
-D3 If (a==1)
+Dics Block 이름
+D1 [T/F]IF (u1 == 0)
+Dics Block 이름2
+D2 [T/F]Switch (u2 >= 5)
 ```
 
+`If`는 `IfExpression`과 선택적인 `ElseIfExpressions`를, `Switch`는 `Criteria`와
+`Threshold`를 읽는다. `MinMax`, `MultiPortSwitch`, `SwitchCase`는 각각 `[SELECT]`,
+`[SELECT]`, `[CASE]`와 저장된 입력 선택 또는 case 설정을 표시한다. `[T/F]`는 실행
+Coverage 결과가 아니라 저장된 블록에 참/거짓 분기가 있다는 정적 표기다.
+
 `DecisionBlockDetails` 시트에는 메인 시트 행, 테스트 케이스명, CUTPath, D번호,
-`BlockType`, 원본 `Name`, 전체 Simulink `Path`, 개별 JSON 객체를 행 단위로 기록한다.
+`Outcome`, `BlockType`, 원본 `Name`, `Expression`, 전체 Simulink `Path`, 개별 JSON
+객체와 조건식 읽기 상태를 행 단위로 기록한다.
 따라서 표시용 셀을 다시 파싱하지 않고 구조화된 열이나 `JSON` 열을 사용할 수 있다.
 블록이 없는 테스트 케이스도 `JSON=[]`인 행으로 남긴다. JSON 객체의 예시는 다음과 같다.
 
 ```json
-{"BlockType":"If","Name":"If","Path":"Top/CUT/Logic/If"}
+{"BlockType":"If","Name":"If","Path":"Top/CUT/Logic/If","Outcome":"T/F","Expression":"u1 > 0","ExpressionStatus":"OK","Message":""}
 ```
 
 CUT의 직계 자식만 포함하므로 `CUT/Subsystem/Switch`처럼 하위 Subsystem 안에 있는
@@ -129,7 +144,7 @@ Excel과 같은 첫 조각과 비고를 사용한다. `DecisionBlocks` 표시값
 미저장 모델·하네스·Test File, 실행 중인 모델, 같은 이름의 다른 모델이 로드된 상태는
 추출을 중단한다. 관리 파일, 모델, Test File, 확인된 외부 하네스와 입력 MAT 파일의
 SHA-256 변경을 감지한다. 개별 시나리오/입력 읽기 실패는 WARN/FAIL과 비고를 남기고
-다른 행을 계속 출력한다. `해당 없음`은 입력이 없는 대상에 사용한다.
+다른 행을 계속 출력한다. `해당 없음`은 Signal Editor가 없는 OFF 대상에만 사용한다.
 
 모델 로드는 해당 모델의 로드 콜백을 실행할 수 있다. 추출기는 콜백이나 iteration
 스크립트를 별도로 실행하지 않으며, 자신이 연 모델은 저장하지 않고 닫는다.

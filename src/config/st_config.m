@@ -144,8 +144,10 @@ cfg.SldvManifestFile = ...
 cfg.SldvTmaxResolution = 0.01;
 
 % true (default):
-%   Before FILE validation or GENERATE execution, convert a non-atomic SLDV
-%   target Subsystem to TreatAsAtomicUnit=on and keep that model change.
+%   Before FILE+SLDV validation or GENERATE execution, convert a non-atomic
+%   unlinked target Subsystem to TreatAsAtomicUnit=on and keep that model
+%   change. Library-linked CUTs are never modified automatically. Ordinary
+%   FILE+MAT inputs do not require atomic conversion.
 %   The normal workflow saves the model during Harness configuration.
 %
 % false:
@@ -162,6 +164,16 @@ cfg.AutoConvertSldvTargetsToAtomic = true;
 %   Signal Editor scenarios. Ignored names are recorded in the SLDV
 %   preparation result and manifest.
 cfg.IgnoreUnexpectedSldvInputs = false;
+
+% true (temporary compatibility mode):
+%   Continue FILE+SLDV preparation when the source MAT was generated for a
+%   different subsystem path. The mismatch is logged as WARN; Harness input
+%   interface validation still applies before scenarios are configured.
+%
+% false:
+%   Reject an SLDV MAT whose ModelInformation.SubsystemPath differs from the
+%   configured CUT path.
+cfg.AllowSldvSubsystemPathMismatch = true;
 
 % true:
 %   Open every registered Harness before SLDV configuration and fail when

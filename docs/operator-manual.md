@@ -62,7 +62,7 @@ st_run_after_harness
 | Top Model 및 dependency | 보통 외부 | 테스트 대상 모델 |
 | `TestManagement.xlsx` | 실제 업무 파일은 제외 | `Targets` 시트 관리 입력 |
 | `runtime_target.mat` | 제외 | `st_select_target_model`이 생성 |
-| `*_sldvdata.mat` | 제외 | `SldvMode=FILE` 입력 |
+| SLDV 결과 MAT 또는 일반 Dataset MAT | 제외 | `SldvMode=FILE` 입력 |
 | `{TopModel}.mldatx` | 제외 | 생성 또는 증분 갱신되는 Test File |
 
 모델, dependency, Test File과 Excel은 runtime 검증이나 번들 내보내기 전에
@@ -92,6 +92,8 @@ st_run_after_harness
 | `Enabled` | 아니요 | `TRUE` |
 | `SldvMode` | 아니요 | `OFF`, `FILE`, `GENERATE` |
 | `SldvDataFile` | `FILE`에서 필수 | `sldv_data/Controller_sldvdata.mat` |
+| `DataFileFormat` | 아니요 | `SLDV`(기본), `MAT` |
+| `MatVariableName` | 아니요 | `FILE+MAT`에서 Dataset 변수 하나를 선택; 빈 값이면 이름순 전체 선택 |
 | `ExpectedUpdateMode` | 아니요 | `DEFAULT`, `OFF`, `APPLY` |
 | `CoverageFilterMode` | 아니요 | `OFF`, `SUBSYSTEM`, `ALL_CONTENT` |
 | `CoverageBoundaryMode` | 아니요 | `OFF`, `CUT_ONLY` |
@@ -140,6 +142,7 @@ cfg.CoverageFilterExistingPolicy
 cfg.PreparationMode
 cfg.CheckSharedSignalEditorDataFile
 cfg.IgnoreUnexpectedSldvInputs
+cfg.AllowSldvSubsystemPathMismatch
 cfg.SaveResultFiles
 ```
 
@@ -445,15 +448,40 @@ Harness에 Signal Editor 블록 자체가 없을 때만 입력 Scenario 없이 �
 
 ### 9.2 `FILE`
 
-기존 `*_sldvdata.mat`을 검증하고 사용합니다.
+기존 SLDV 결과 MAT 또는 일반 Dataset MAT를 검증하고 사용합니다. 두 파일 모두
+확장자가 `.mat`일 수 있으므로 `DataFileFormat`으로 명시적으로 구분합니다.
 
 ```text
 SldvMode=FILE
 SldvDataFile=sldv_data/Controller_sldvdata.mat
+DataFileFormat=SLDV
 ```
 
-MAT는 일반 Signal Editor MAT가 아니라 Design Verifier가 생성한 `sldvData`
-구조체 파일이어야 합니다. 자동화가 Dataset Scenario로 변환합니다.
+`DataFileFormat` 열이 없는 기존 Excel은 `SLDV`로 처리하므로 동작이 바뀌지 않습니다.
+`SLDV`는 Design Verifier가 생성한 `sldvData` 구조체를 기존 흐름으로 읽고,
+TestCase parameter override도 그대로 적용합니다.
+
+일반 Dataset 입력은 다음처럼 설정합니다.
+
+```text
+SldvMode=FILE
+SldvDataFile=input_data/Controller_scenarios.mat
+DataFileFormat=MAT
+MatVariableName=
+```
+
+MAT 파일의 비어 있지 않은 scalar `Simulink.SimulationData.Dataset`만 후보입니다.
+`MatVariableName`이 비어 있으면 후보를 변수명으로 정렬해 각각 Scenario로 만들고,
+값이 있으면 정확히 일치하는 변수 하나만 사용합니다. Dataset 외 변수가 함께 있어도
+무시하지만 Dataset 후보가 없거나 지정 변수가 없거나 Dataset이 아니면 실패합니다.
+최종 Scenario 이름은 `UT_REQ_{CUTName}_{index}` 규칙을 사용하고 원래 MAT 변수명은
+manifest `OriginalNames`에 보존합니다.
+
+여러 Dataset은 입력 개수·순서·이름·자료형·차원이 모두 같아야 하며 Harness Signal
+Editor ActiveScenario와도 정확히 일치해야 합니다. 각 Scenario의 EndTime은 모든
+입력 신호의 마지막 시간 중 최댓값입니다. 시간 정보가 전혀 없으면 임의 시간을
+생성하지 않고 실패합니다. MAT Scenario는 parameter payload가 없으므로
+`ParameterCount=0`이며 `sldvsimdata`와 `st_apply_sldv_parameters`를 호출하지 않습니다.
 
 Harness의 기존 Signal Editor MAT에 `TestCase_1`, `TestCase_2`, ...처럼 여러
 Scenario가 이미 있으면 SLDV 원본 TestCase 번호와 일대일 대응해 각각의
@@ -462,14 +490,19 @@ Scenario의 기존 값으로 보존됩니다. 번호 기반 대응이 불가능�
 `ActiveScenario`, `InputScenario`, 유일한 Dataset 순으로 단일 템플릿을
 선택하며, 둘 이상이 모호하게 남으면 임의 선택하지 않고 실패합니다.
 
-`FILE`과 `GENERATE` 대상은 모두 Atomic Subsystem이어야 합니다. 기본 설정인
-`cfg.AutoConvertSldvTargetsToAtomic=true`에서는 `TreatAsAtomicUnit=off`인 CUT을
-SLDV 준비 전에 `on`으로 바꾸고 되돌리지 않습니다. 전체 workflow를 실행하면
-뒤의 Harness 구성 단계가 모델을 저장합니다. `st_prepare_sldv_targets`만 단독으로
-호출했다면 모델이 Dirty 상태로 남으므로 검토 후 직접 저장해야 합니다.
-자동 변경을 금지하려면 이 설정을 `false`로 바꾸며, 이 경우 비-Atomic CUT은
-명확한 오류로 중단됩니다. 처리 결과는 `SldvGenerationResult`의
-`AtomicAction` 열에서 확인합니다.
+`FILE+SLDV`와 `GENERATE` 대상은 Atomic Subsystem이어야 합니다. 기본 설정인
+`cfg.AutoConvertSldvTargetsToAtomic=true`에서는 링크가 없는
+`TreatAsAtomicUnit=off` CUT만 SLDV 준비 전에 `on`으로 바꿉니다. 라이브러리 linked
+CUT는 링크 훼손을 막기 위해 자동 변경하지 않고 `SldvLinkedCUTRequiresAtomic`으로
+중단합니다. 이 경우 원본 library block을 Atomic으로 설정하고 instance link를
+갱신해야 합니다. 일반 `FILE+MAT` Dataset은 SLDV 분석을 실행하지 않으므로 Atomic
+변환을 생략하며 `AtomicAction=NOT_REQUIRED_MAT`를 기록합니다.
+
+라이브러리 linked CUT에 연결된 Harness는 workflow 시작 시 `SyncOnOpen`으로
+보정합니다. 이는 Harness를 열 때 원본 CUT를 Harness로 가져오되, Harness 종료 시
+CUT 복사본이 원본 모델로 push되는 동작을 차단합니다. Harness 생성·clone 전후에는
+`StaticLinkStatus`와 `ReferenceBlock`을 비교하며 달라지면
+`HarnessChangedLibraryLink`으로 즉시 중단합니다.
 
 SLDV MAT에 Harness `ActiveScenario`에 없는 신규 입력이 포함되면 기본
 `cfg.IgnoreUnexpectedSldvInputs=false`에서는 준비 단계가 실패합니다. 신규 입력이
@@ -477,6 +510,12 @@ SLDV MAT에 Harness `ActiveScenario`에 없는 신규 입력이 포함되면 기
 변경할 수 있습니다. 이때 신규 입력은 Signal Editor Scenario에서 제외되고,
 공통 입력만 SLDV 값으로 교체됩니다. 제외 내역은 `SldvGenerationResult`의
 `IgnoredSldvInputs`, `IgnoredSldvInputCount` 열에서 확인합니다.
+
+현재 `cfg.AllowSldvSubsystemPathMismatch=true`는 같은 라이브러리 구현을 서로 다른
+모델 계층에서 사용하는 임시 호환을 위해, `FILE+SLDV` MAT에 기록된
+`ModelInformation.SubsystemPath`가 대상 CUT과 달라도 WARN만 남기고 계속합니다.
+Harness 입력 인터페이스 검증은 유지됩니다. 경로 오사용을 다시 엄격하게 차단하려면
+이 설정을 `false`로 변경합니다.
 
 ### 9.3 `GENERATE`
 
@@ -512,6 +551,13 @@ cfg.CheckSharedSignalEditorDataFile = false;
 | `DEFAULT` | `cfg.ExpectedUpdateMode` 사용 |
 
 기대값 변경 의도가 없다면 Excel 행과 전역 기본값을 `OFF`로 설정합니다.
+
+`cfg.VerifyHarnessOutportsOnly=true`이고 실제 실행 Harness/standalone 모델에
+사용 가능한 최상위 출력 신호가 0개이면 verify할 대상도 없습니다. 이 경우 빈
+verify Action은 정상 구성이며 verify timing 검사와 기대값 갱신은
+`SKIP_NO_VERIFY_OUTPUT`으로 기록하고 계속합니다. 출력이 하나라도 있는데 verify
+결과가 없거나 `Untested`인 경우는 계속 실패입니다. 모든 Assessment 입력을
+검증하는 `VerifyHarnessOutportsOnly=false`에는 이 예외를 적용하지 않습니다.
 
 ## 11. 종합 검증
 
@@ -744,6 +790,7 @@ plan = st_cleanup_results( ...
 ```text
 Targets.SldvMode=FILE
 Targets.SldvDataFile=<Excel 기준 MAT 상대경로>
+Targets.DataFileFormat=SLDV
 cfg.RunGeneratedTests=false
 cfg.OverwriteTestFile=false
 ```
@@ -785,7 +832,7 @@ summary = st_verify_all( ...
 2. `result/reports/WorkflowPlanResult.ini`
 3. 해당 단계 INI 결과의 `Status`, `Message`
 4. `PreparationMode=FORCE`가 필요한지 판단
-5. SLDV FILE이면 subsystem path, TestCase, Dataset 이름·자료형·차원 확인
+5. FILE이면 형식, Dataset 변수 선택, 이름·자료형·차원과 Harness 일치 여부 확인
 6. Test Manager 단계면 Scenario/Iteration 이름과 기존 TC 중복 확인
 7. runtime 인증은 `VerificationSummary.xlsx`의 required FAIL/BLOCKED 확인
 

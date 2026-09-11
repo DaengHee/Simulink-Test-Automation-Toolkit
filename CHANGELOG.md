@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Protected library-linked CUTs during Harness creation and reuse. Linked CUT
+  Harnesses now use one-way `SyncOnOpen` synchronization, link status and
+  reference identity are checked around create/clone operations, and automatic
+  Atomic conversion fails safely instead of modifying a linked block. Ordinary
+  `FILE+MAT` input no longer requests an SLDV-only Atomic conversion.
+- Temporarily allow `FILE+SLDV` MAT files whose recorded subsystem path differs
+  from the configured CUT when `cfg.AllowSldvSubsystemPathMismatch=true` (the
+  default), while logging a warning and retaining Harness input-interface checks.
+- Targets with no usable Harness output now configure an empty verify action and
+  report `SKIP_NO_VERIFY_OUTPUT` during verify-timing validation and expected-value
+  update. Missing or untested verify results still fail when an output exists.
+- Extended `SldvMode=FILE` with explicit `DataFileFormat=SLDV|MAT` and optional
+  `MatVariableName`. Ordinary MAT Dataset scenarios are selected deterministically,
+  checked for exact interface and time consistency, copied to Signal Editor input,
+  and skip SLDV-only parameter processing. Existing workbooks default to `SLDV`.
+- Fixed nested-cell `dataNoEffect` handling and centralized Dataset interface
+  inspection on the documented `getElementNames` API.
 - Fixed specification workbook writing when MaxTime is NaN or text is missing.
   Overflow checks now preserve numeric cells and normalize missing strings to
   empty cells before character conversion.

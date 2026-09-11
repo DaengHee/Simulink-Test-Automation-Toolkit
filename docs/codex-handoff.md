@@ -127,13 +127,27 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 9. 각 CUT의 MLDATX, CVT, CVF, Excel, HTML과 선택적 PDF를 확인한다.
 10. 모델, Test File, Excel과 입력 파일의 원본 checksum 불변을 확인한다.
 11. 직계 Inport 없음+Signal Editor 있음, Signal Editor 없음, 손상/중복 Signal
-    Editor의 성공·WARN·실패 경계를 각각 확인한다.
+    Editor의 성공·WARN·실패 경계를 TC 연결과 명세서 추출에서 각각 확인한다.
 12. ORIGINAL/STANDALONE_HARNESS × OFF/CUT_ONLY와 기존 필터 동시 적용을 확인한다.
 13. 여러 CUT가 manifest 순서대로 실행되고 각 standalone 모델이 다음 CUT 전에
     닫히는지 확인한다.
 14. ExpectedUpdateMode=APPLY 갱신과 선택적 재실행 결과가 종합 보고서에 남는지 확인한다.
 15. export 전후 원본 모델·Test File checksum, Dirty 상태와 Harness inventory가
     불변인지 확인한다.
+16. If/Switch/MinMax/MultiPortSwitch/SwitchCase가 있는 CUT의 명세서를 export하고,
+    블록 이름 다음 줄의 D번호·분기종류·저장 파라미터 표현과 DecisionBlockDetails의
+    Outcome/Expression/ReadStatus가 실제 블록 설정과 일치하는지 확인한다.
+17. FILE+MAT 단일/복수 Dataset, 명시적 MatVariableName, Scenario 간 및 Harness
+    interface mismatch, Dataset 없음·시간 없음, nested dataNoEffect를 확인하고 MAT
+    실행에서 sldvsimdata와 parameter override가 호출되지 않는 증거를 보관한다.
+18. 사용 가능한 Harness 출력이 0개인 ORIGINAL/STANDALONE 대상을 실행하여
+    Assessment 구성, verify timing, ExpectedUpdateMode=APPLY가 각각
+    SKIP_NO_VERIFY_OUTPUT으로 계속되는지 확인한다. 출력이 있는 대상의 verify 결과
+    누락과 Untested는 계속 실패하는 반대 사례도 함께 보관한다.
+19. 실제 library-linked CUT에서 일반 생성과 HARNESS_CLONE을 각각 수행해 Harness가
+    SyncOnOpen이고 원본 CUT의 StaticLinkStatus·ReferenceBlock·library 파일 checksum이
+    전후 동일한지 확인한다. FILE+MAT는 Atomic 변환을 생략하고, 비-Atomic
+    FILE+SLDV/GENERATE는 원본 링크를 바꾸지 않은 채 명시적으로 실패해야 한다.
 
 실패 시 최소 전달 자료:
 
@@ -172,11 +186,31 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 - `CoverageBoundaryMode=OFF|CUT_ONLY`는 기존 CoverageFilterMode와 독립적으로
   해석한다. OFF+CUT_ONLY도 AUTO에서 PER_CUT을 선택하며 internal Harness와
   standalone 모델의 실제 실행 CUT를 기준으로 외부 규칙을 생성한다.
+- `st_export_test_specification`도 직계 Inport가 아니라 Signal Editor 존재와 실제
+  TC 연결을 기준으로 입력을 추출한다. OFF+no-Inport라도 연결된 시나리오를 출력하고,
+  Signal Editor 자체가 없을 때만 `SKIP_NO_SIGNAL_EDITOR` WARN으로 처리한다.
 - 현재 PC에는 MATLAB과 MISS_HIT 실행 환경이 없다. `git diff --check`와 정적 계약
   테스트 소스 검토만 수행했으며 MATLAB 단위/통합/fixture는 실행하지 못했다.
-- R2025b에서는 위 "반드시 확인할 항목"의 15개 증거와 `CVF-CHECK-v2`,
+- R2025b에서는 위 "반드시 확인할 항목"의 17개 증거와 `CVF-CHECK-v2`,
   `SYSTEM-CHECK-v1`, 대상 manifest/CVF/보고서를 보관해야 한다. 그 전에는 main에
   통합하거나 런타임 인증 완료로 표현하지 않는다.
+
+### 2026-09-09 FILE 일반 MAT Dataset 입력
+
+- `SldvMode=FILE`에서 optional `DataFileFormat=SLDV|MAT`와 `MatVariableName`을
+  읽는다. 새 열이 없으면 `SLDV`가 기본이어서 기존 `sldvData` 흐름이 유지된다.
+- MAT parser는 비어 있지 않은 scalar `Simulink.SimulationData.Dataset` 변수를
+  이름순으로 선택하고, 모든 Scenario와 Harness ActiveScenario의 입력 개수·순서·
+  이름·자료형·차원을 정확히 검증한다. 마지막 신호 시간의 최댓값을 EndTime으로
+  사용하며 시간 없는 Dataset은 실패시킨다.
+- MAT Scenario는 기존 이름 규칙을 사용하고 원래 변수명을 `OriginalNames`로 보존한다.
+  `ParameterCounts=0`으로 정상화하여 Test Manager에서 `sldvsimdata`와
+  `st_apply_sldv_parameters`를 건너뛴다.
+- SLDV와 MAT parser는 공통 profile/meta schema로 합쳐지고 Signal Editor부터 같은
+  workflow를 사용한다. Dataset 이름은 공통 `st_dataset_signature`의
+  `getElementNames`로 읽고 nested cell `dataNoEffect`는 재귀적으로 처리한다.
+- 현재 PC에는 MATLAB과 MISS_HIT 실행 환경이 없다. 정적 검사와 소스 계약 테스트만
+  수행하며 R2025b에서는 위 17번의 성공/실패 경계와 원본 파일 불변 증거가 필요하다.
 
 ### 2026-09-09 Template Harness clone 전환
 
@@ -193,6 +227,33 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 - MATLAB은 이 PC에서 발견되지 않았다. 새 단위/통합 테스트는 런타임 미수행이다.
   정적 검사 결과만으로 clone/CUT 연결이나 복구가 런타임 검증됐다고 표현하지 않는다.
 
+### 2026-09-09 출력 없는 대상의 verify 처리
+
+- `VerifyHarnessOutportsOnly=true`에서 실제 실행 Harness 또는 standalone 모델에
+  사용 가능한 최상위 출력 신호가 0개이면 빈 verify Action을 정상으로 허용한다.
+  verify timing 검증과 기대값 갱신은 `SKIP_NO_VERIFY_OUTPUT`으로 기록한다.
+- 출력이 하나라도 있으면 verify 결과 없음과 Untested는 이전과 동일하게 실패한다.
+  `VerifyHarnessOutportsOnly=false`도 출력 개수와 무관하게 verify 결과가 필요하다.
+- PER_CUT verify 검증은 현재 대상 행만 전달하여 standalone 실행 context와 다중 CUT
+  매핑을 보존한다.
+- 현재 PC에는 MATLAB이 없어 순수 정책 테스트와 정적 계약 검사만 작성했다. R2025b
+  런타임 검증은 위 18번 증거를 추가한 뒤에만 완료로 판단한다.
+
+### 2026-09-10 library-linked CUT Harness 보호
+
+- 실제 `st_run_after_harness(..., 'ExecutionMode','PER_CUT')` 사용 중 원본을 복구해야
+  할 정도로 library link가 끊긴 사례가 보고됐다. 당시 모델은 이미 원복되어 정확한
+  StaticLinkStatus와 crash dump는 확보하지 못했다.
+- linked CUT Harness는 `SyncOnOpen`으로 생성하고, 기존·clone Harness도 처음 열기 전에
+  같은 모드로 보정한다. Harness 종료 시 CUT 복사본을 원본으로 push하는
+  SyncOnOpenAndClose 경로를 사용하지 않는다.
+- create/clone/close 전후 StaticLinkStatus와 ReferenceBlock을 비교해 변화가 있으면
+  `HarnessChangedLibraryLink`으로 즉시 중단한다.
+- FILE+MAT는 Atomic 변환을 생략한다. FILE+SLDV와 GENERATE의 비-Atomic linked CUT는
+  자동 수정하지 않고 `SldvLinkedCUTRequiresAtomic`으로 실패시킨다.
+- R2025b용 실제 library fixture를 추가했지만 현재 PC에는 MATLAB이 없어 실행하지
+  못했다. 위 19번 증거 전에는 runtime 해결 완료로 판단하지 않는다.
+
 
 ### 2026-09-04 테스트 명세서 추출 추가
 
@@ -204,15 +265,17 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 - `test_specification_verify_modes.m`에 스텝 선택·순서·부분 실패·동적 열/셀 제한
   회귀 검사를 추가했다. MATLAB 없는 PC에서 정적 검사만 가능하며 실제 대상은 실행하지 않는다.
 - 추가 요청으로 MaxTime 열을 넣었다. 이후 의미를 생성 방식별로 바로잡아 SLDV
-  `FILE/GENERATE`는 연결된 TC 입력 시나리오의 Tmax를, `OFF` 및 가져온 하네스는
+  `FILE/GENERATE`는 연결된 TC 입력 시나리오의 Tmax를, `OFF` 대상은
   실제 Harness Solver `StopTime`을 기록한다. 해당 기준값을 확인할 수 없으면
   NaN(Excel 빈 셀)과 비고를 남기며 다른 기준으로 자동 대체하지 않는다.
 - 시간값 선택은 `st_specification_max_time`으로 분리했고, OFF에 시간 입력이 있어도
   입력 Tmax를 쓰지 않는 회귀 검사와 SLDV의 StopTime fallback 금지 검사를 추가했다.
   현재 PC에는 MATLAB이 없어 이 변경도 정적 검사만 수행했다.
 - 명세서의 `DecisionBlocks` 열은 CUT 아래 If/MinMax/Switch/MultiPortSwitch/SwitchCase
-  후보를 `D번호 실제 블록 Name` 형식의 줄 목록으로 기록한다. 원본 BlockType, Name,
-  전체 경로와 개별 JSON 객체는 `DecisionBlockDetails` 시트에 블록별 행으로 기록한다.
+  후보를 블록 이름과 `D번호 [분기종류]블록유형 (저장된 조건/선택 설정)` 두 줄씩
+  기록한다. If/Switch는 `[T/F]`, MinMax/MultiPortSwitch는 `[SELECT]`, SwitchCase는
+  `[CASE]`를 사용한다. 원본 Outcome, BlockType, Name, Expression, 전체 경로와 개별
+  JSON 객체, 읽기 상태는 `DecisionBlockDetails` 시트에 블록별 행으로 기록한다.
   Name은 경로 문자열을 분리하지 않고 `get_param(path,'Name')`으로 읽는다. `SearchDepth=1`로
   CUT의 직계 자식만 정렬·중복 제거하며 하위 Subsystem, 마스크, 라이브러리 링크,
   Variant, 참조 모델 내부 및 Stateflow/MATLAB Function 내부 분기는 포함하지 않는다.
@@ -240,6 +303,16 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   중첩 `cleanup_session`이 해제된 `openedTestFile`을 참조하여 onCleanup 경고가 발생했다.
   정리 콜백을 인수를 캡처하는 로컬 함수로 분리했다. 미저장 보호는 유지하며, 해당 오류
   경로의 회귀 검사를 추가했다. 수정 후 실제 MATLAB 재검증은 아직 미수행이다.
+
+### 2026-09-09 SLDV 서브시스템 경로 임시 호환
+
+- `cfg.AllowSldvSubsystemPathMismatch=true`를 기본값으로 추가했다. `FILE+SLDV`
+  MAT의 `sldvData.ModelInformation.SubsystemPath`가 대상 CUT 전체 경로와 달라도
+  예상·실제 경로와 파일을 WARN으로 기록하고 계속 준비한다.
+- Harness ActiveScenario 입력 인터페이스, SLDV 입력 선택과 이후 Scenario 검증은
+  그대로 유지한다. 엄격 차단으로 복귀할 때는 설정을 `false`로 바꾸면 된다.
+- 해당 설정을 SLDV 증분 실행 signature에 포함했다. 현재 PC에는 MATLAB이 없어
+  정적 계약 검사만 수행했으며 실제 라이브러리 링크 CUT 재사용은 R2025b에서 확인해야 한다.
 
 ### 기존 통합 검증
 
