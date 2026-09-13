@@ -10,8 +10,6 @@ addParameter(p, 'RequireCoverage', false, ...
     @(x) islogical(x) && isscalar(x));
 addParameter(p, 'CoveragePath', '', ...
     @(x) ischar(x) || isstring(x));
-addParameter(p, 'ReadOnly', false, ...
-    @(x) islogical(x) && isscalar(x));
 addParameter(p, 'RequireExactSet', false, ...
     @(x) islogical(x) && isscalar(x));
 parse(p, varargin{:});
@@ -55,9 +53,7 @@ try
     metricCount = 0;
     for i = 1:numel(coverageObjects)
         cvd = coverageObjects{i};
-        if ~p.Results.ReadOnly
-            cvd.filter = propertyValue;
-        end
+        cvd.filter = propertyValue;
         returned = string(cvd.filter);
         returned = returned(:);
         returned(ismissing(returned)) = "";
@@ -83,9 +79,6 @@ try
             cvd, char(string(p.Results.CoveragePath)));
     end
     result.MetricReadbackCount = metricCount;
-    if p.Results.ReadOnly
-        result.Message = 'Coverage filter readback verified';
-    end
     st_log(cfg, 'INFO', ...
         'Result coverage filter attach complete | elapsed=%.3f sec', ...
         toc(totalTimer));

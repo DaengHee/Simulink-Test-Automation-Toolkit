@@ -150,7 +150,8 @@ st_find_target_paths              % 같은 이름의 후보를 문맥으로 순�
 | `st_run_from_harness` | Harness가 없을 수 있는 전체 workflow |
 | `st_run_after_harness` | 기존 Harness를 검증한 뒤 SLDV 단계부터 실행 |
 | `st_run_tests_per_cut` | 이미 준비된 Test File을 CUT별로 직접 실행 |
-| `st_run_standalone_coverage_pipeline` | standalone Harness Coverage를 STEP1/STEP234/STEP5/STEP6으로 실행·재개 |
+| `st_run_standalone_coverage_pipeline` | standalone Harness Coverage를 `EXECUTE/PACKAGE/SUMMARY/ALL` Action으로 실행·재개 |
+| `st_check_standalone_coverage` | standalone 결과를 10비트 코드와 최대 20줄 화면으로 읽기 전용 검사 |
 
 두 workflow 진입점은 다음 네 개의 결과를 반환할 수 있습니다.
 

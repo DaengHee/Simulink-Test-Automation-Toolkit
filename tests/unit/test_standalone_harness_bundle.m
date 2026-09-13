@@ -18,16 +18,20 @@ verifyTrue(testCase, contains(source, ...
     'StandaloneHarnessRequiresReproducibleProfile'));
 end
 
-function testDisposableExportUsesUniqueTargetModelAndCUTReadback(testCase)
+function testDisposableExportPreservesHarnessModelNameAndCUTReadback(testCase)
 root = st_project_root();
 source = fileread(fullfile(root, 'src', 'exporting', ...
     'st_export_standalone_harnesses.m'));
-verifyTrue(testCase, contains(source, "'TARGET_HARNESS'"));
-verifyTrue(testCase, contains(source, "sprintf('st_h_%04d_%s'"));
+verifyFalse(testCase, contains(source, "'TARGET_HARNESS'"));
+verifyFalse(testCase, contains(source, "sprintf('st_h_%04d_%s'"));
+verifyTrue(testCase, contains(source, ...
+    'outputModel = standalone_model_name(harnessName)'));
 verifyTrue(testCase, contains(source, 'temporaryModelFile'));
 verifyTrue(testCase, contains(source, 'identify_standalone_cut'));
 verifyTrue(testCase, contains(source, 'interface_signature'));
 verifyTrue(testCase, contains(source, 'StandaloneCUTPath'));
+verifyTrue(testCase, contains(source, ...
+    "folder = sprintf('%04d_%s', round(double(row.No)), safeName)"));
 end
 
 function testRunnerRewiresAndUsesSequentialPath(testCase)
@@ -146,9 +150,15 @@ verifyTrue(testCase, contains(pipeline, ...
     "assert_pipeline_source_unloaded(cfg, 'before standalone export')"));
 verifyTrue(testCase, contains(pipeline, ...
     "assert_pipeline_source_unloaded(cfg, 'before bundle runner')"));
+verifyTrue(testCase, contains(pipeline, ...
+    "assert_pipeline_source_unloaded(cfg, 'after bundle runner')"));
 runner = fileread(fullfile(root, 'resources', 'export_bundle', ...
     'run_exported_tests.m'));
 verifyTrue(testCase, contains(runner, 'BundleModelAlreadyLoaded'));
+verifyTrue(testCase, contains(runner, ...
+    'cleanup_standalone_execution_session'));
+verifyTrue(testCase, contains(runner, ...
+    'Standalone copied session cleanup complete'));
 end
 
 
@@ -163,14 +173,12 @@ verifyTrue(testCase, contains(source, ...
 end
 
 
-function testExpectedUpdateSupportsStandaloneRoot(testCase)
+function testStandalonePreparationDisablesExpectedUpdate(testCase)
 root = st_project_root();
-update = fileread(fullfile(root, 'src', 'execution', ...
-    'st_update_expected_from_results.m'));
-logging = fileread(fullfile(root, 'src', 'execution', ...
-    'st_prepare_expected_value_logging_for_targets.m'));
-verifyTrue(testCase, contains(update, 'harnessRoot = executionModel'));
-verifyTrue(testCase, contains(update, 'save_system(executionModel)'));
-verifyTrue(testCase, contains(logging, ...
-    'loggingRoot = executionModel'));
+prepare = fileread(fullfile(root, 'src', 'execution', ...
+    'st_prepare_standalone_bundle_execution.m'));
+verifyTrue(testCase, contains(prepare, ...
+    'targets.SourceExpectedUpdateMode = targets.ExpectedUpdateMode'));
+verifyTrue(testCase, contains(prepare, ...
+    'targets.ExpectedUpdateMode(:) = "OFF"'));
 end

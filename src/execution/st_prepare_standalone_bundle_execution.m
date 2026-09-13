@@ -31,6 +31,10 @@ StandaloneCUTPath = strings(n,1);
 ModelFile = strings(n,1);
 AssessmentBlock = strings(n,1);
 IterationSignature = strings(n,1);
+SUTReadbackStatus = repmat("FAIL", n, 1);
+IterationIntegrityStatus = repmat("FAIL", n, 1);
+InputReadbackStatus = repmat("NOT_REQUIRED", n, 1);
+AssessmentReadbackStatus = repmat("FAIL", n, 1);
 Status = repmat("FAIL", n, 1);
 Message = strings(n,1);
 
@@ -92,6 +96,7 @@ for i = 1:n
                     ['Standalone Signal Editor Filename readback failed. ' ...
                      'Expected=%s | Actual=%s'], expectedInput, actualInput);
             end
+            InputReadbackStatus(i) = "OK";
         end
         save_system(model);
 
@@ -106,6 +111,8 @@ for i = 1:n
         verify_property(tc, 'HarnessOwner', '');
         verify_property(tc, 'HarnessName', '');
         verify_property(tc, 'TestSequenceBlock', assessment);
+        SUTReadbackStatus(i) = "OK";
+        AssessmentReadbackStatus(i) = "OK";
         configure_standalone_coverage(tf, suite, tc, cfg);
         rewiredIterationSignature = iteration_signature(tc);
         if rewiredIterationSignature ~= originalIterationSignature
@@ -113,6 +120,7 @@ for i = 1:n
                 ['Standalone Test Case rewiring changed Iteration or ' ...
                  'Signal Editor/Test Sequence Scenario settings.']);
         end
+        IterationIntegrityStatus(i) = "OK";
 
         order(i) = targetMatch;
         testCases(i,1) = tc;
@@ -155,16 +163,21 @@ for i = 1:n
     end
 end
 targets = sourceTargets(order,:);
+targets.SourceExpectedUpdateMode = targets.ExpectedUpdateMode;
+targets.ExpectedUpdateMode(:) = "OFF";
 targets.ExecutionModel = ExecutionModel;
 targets.StandaloneCUTPath = StandaloneCUTPath;
 targets.ExecutionModelFile = ModelFile;
 result = table(double(targets.No), string(targets.TestCaseName), ...
     ExecutionModel, StandaloneCUTPath, ModelFile, AssessmentBlock, ...
-    IterationSignature, ...
+    IterationSignature, SUTReadbackStatus, IterationIntegrityStatus, ...
+    InputReadbackStatus, AssessmentReadbackStatus, ...
     Status, Message, ...
     'VariableNames', {'No','TestCaseName','ExecutionModel', ...
     'StandaloneCUTPath','ModelFile','AssessmentBlock', ...
-    'IterationSignature','Status','Message'});
+    'IterationSignature','SUTReadbackStatus', ...
+    'IterationIntegrityStatus','InputReadbackStatus', ...
+    'AssessmentReadbackStatus','Status','Message'});
 st_write_result('StandaloneBundlePreparationResult', result);
 st_log(cfg, 'INFO', ...
     'Standalone bundle preparation complete | Targets=%d | elapsed=%.3f sec', ...

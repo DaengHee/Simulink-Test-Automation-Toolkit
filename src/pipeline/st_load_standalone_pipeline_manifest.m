@@ -48,10 +48,18 @@ end
 manifest = decode_json(manifestPath);
 require_field(manifest, 'Version', manifestPath);
 require_field(manifest, 'PipelineId', manifestPath);
-if double(manifest.Version) ~= 1 || ...
-        ~strcmp(char(string(manifest.PipelineId)), pipelineId)
+if ~strcmp(char(string(manifest.PipelineId)), pipelineId)
     error('simtest:StandalonePipelineManifestInvalid', ...
-        'Pipeline manifest identity/version is invalid: %s', manifestPath);
+        'Pipeline manifest identity is invalid: %s', manifestPath);
+end
+if double(manifest.Version) ~= 2
+    error('simtest:StandalonePipelineManifestMigrationRequired', ...
+        ['Pipeline manifest v1 cannot resume the Action workflow. ' ...
+         'Run Action=EXECUTE to create a v2 pipeline: %s'], manifestPath);
+end
+if ~isfield(manifest, 'Actions')
+    error('simtest:StandalonePipelineManifestInvalid', ...
+        'Pipeline manifest Actions are missing: %s', manifestPath);
 end
 end
 

@@ -23,6 +23,14 @@ addParameter(p, 'TestFile', [], @(x) true);
 addParameter(p, 'TestCases', [], @(x) true);
 addParameter(p, 'RunRootDirectory', '', ...
     @(x) ischar(x) || isstring(x));
+addParameter(p, 'GenerateResultArtifacts', true, ...
+    @(x) islogical(x) && isscalar(x));
+addParameter(p, 'WriteRunSummaryExcel', true, ...
+    @(x) islogical(x) && isscalar(x));
+addParameter(p, 'SaveTestResult', false, ...
+    @(x) islogical(x) && isscalar(x));
+addParameter(p, 'ResultFile', '', ...
+    @(x) ischar(x) || isstring(x));
 parse(p, varargin{:});
 
 continueOnFailure = logical(p.Results.ContinueOnFailure);
@@ -30,6 +38,14 @@ reportMode = upper(char(string(p.Results.ReportMode)));
 failOnNonPass = logical(p.Results.FailOnNonPass);
 resultFilterMode = upper(char(string(p.Results.ResultFilterMode)));
 applyManagedFiltersDuringRun = strcmp(resultFilterMode, 'DURING_RUN');
+generateResultArtifacts = logical(p.Results.GenerateResultArtifacts);
+writeRunSummaryExcel = logical(p.Results.WriteRunSummaryExcel);
+saveTestResult = logical(p.Results.SaveTestResult);
+resultFile = strtrim(char(string(p.Results.ResultFile)));
+if saveTestResult && isempty(resultFile)
+    error('simtest:PerCutResultFileRequired', ...
+        'ResultFile is required when SaveTestResult=true.');
+end
 
 cfg = st_require_runtime_target();
 existingFilterPolicy = st_coverage_filter_existing_policy( ...
@@ -117,6 +133,8 @@ CVFPath = strings(n,1);
 CVFSHA256 = strings(n,1);
 CVFRuleCount = zeros(n,1);
 FilterGenerationStatus = repmat("OFF", n, 1);
+RunCount = zeros(n,1);
+ResultFilterAttachCount = zeros(n,1);
 InitialOutcome = repmat("NOT_RUN", n, 1);
 FinalOutcome = repmat("NOT_RUN", n, 1);
 InitialReport = strings(n,1);
@@ -126,6 +144,8 @@ ExpectedUpdatedCount = zeros(n,1);
 FilterApplyStatus = repmat("NOT_RUN", n, 1);
 ResultFilterStatus = repmat("NOT_REQUIRED", n, 1);
 FilterRestoreStatus = repmat("NOT_RUN", n, 1);
+ModelCleanupStatus = repmat("NOT_RUN", n, 1);
+PathCleanupStatus = repmat("NOT_RUN", n, 1);
 Status = repmat("FAIL", n, 1);
 Message = strings(n,1);
 DurationSec = zeros(n,1);
@@ -168,27 +188,14 @@ for i = 1:n
         end
 
         filterFile = "";
-        if st_coverage_filter_active(row)
-            mkdir(filterDirectory);
-            filterFile = string(st_per_cut_coverage_filter_file( ...
-                filterDirectory, row));
+        if applyManagedFiltersDuringRun && st_coverage_filter_active(row)
             FilterGenerationStatus(i) = "STARTED";
-            generated = st_generate_coverage_filter_file( ...
-                row, char(filterFile), cfg);
-            FilterGenerationStatus(i) = generated.Status;
-            CVFRuleCount(i) = generated.RuleCount;
-            if generated.Status ~= "OK" || ~isfile(filterFile)
-                error('simtest:PerCutCoverageFilterPreparationFailed', ...
-                    'CVF was not generated for %s: %s', ...
-                    char(TestCaseName(i)), char(generated.Message));
-            end
+            [filterFile, generationStatus, ruleCount, filterHash] = ...
+                generate_filter(row, filterDirectory, cfg, logPath, i, true);
+            FilterGenerationStatus(i) = generationStatus;
+            CVFRuleCount(i) = ruleCount;
             CVFPath(i) = filterFile;
-            signature = st_file_signature(filterFile);
-            CVFSHA256(i) = string(signature.SHA256);
-            addpath(filterDirectory, '-begin');
-            st_log(cfg, 'DEBUG', ...
-                '[PER_CUT %d/%d] CVF directory registered | %s', ...
-                i, n, filterDirectory);
+            CVFSHA256(i) = filterHash;
         end
 
         applyStarted = true;
@@ -215,9 +222,12 @@ for i = 1:n
         end
         st_log(cfg, 'DEBUG', ...
             '[PER_CUT %d/%d] run(testCase) initial start', i, n);
+        append_event(logPath, i, 'RUN_START', char(TestCaseName(i)));
         append_event(logPath, i, 'RUN_INITIAL_START', char(TestCaseName(i)));
         initialResult = run(tc);
+        RunCount(i) = RunCount(i) + 1;
         append_event(logPath, i, 'RUN_INITIAL_DONE', char(TestCaseName(i)));
+        append_event(logPath, i, 'RUN_DONE', char(TestCaseName(i)));
         st_log(cfg, 'DEBUG', ...
             ['[PER_CUT %d/%d] run(testCase) initial complete | ' ...
              'CVF managed by Test Manager=%s'], ...
@@ -233,7 +243,16 @@ for i = 1:n
         validate_verify_timing(initialResult, 'initial', row);
         if ~applyManagedFiltersDuringRun && ...
                 st_coverage_filter_active(row)
+            FilterGenerationStatus(i) = "STARTED";
+            [filterFile, generationStatus, ruleCount, filterHash] = ...
+                generate_filter(row, filterDirectory, cfg, logPath, i, false);
+            FilterGenerationStatus(i) = generationStatus;
+            CVFRuleCount(i) = ruleCount;
+            CVFPath(i) = filterFile;
+            CVFSHA256(i) = filterHash;
             ResultFilterStatus(i) = "STARTED";
+            append_event(logPath, i, 'RESULT_FILTER_ATTACH', ...
+                char(CVFPath(i)));
             append_event(logPath, i, 'RESULT_FILTER_ATTACH_START', ...
                 char(CVFPath(i)));
             attachInfo = st_apply_result_coverage_filters( ...
@@ -242,6 +261,7 @@ for i = 1:n
                 'CoveragePath', coverage_path(row), ...
                 'RequireExactSet', true);
             ResultFilterStatus(i) = string(attachInfo.Status);
+            ResultFilterAttachCount(i) = ResultFilterAttachCount(i) + 1;
             if ResultFilterStatus(i) ~= "OK"
                 error('simtest:ResultCoverageFilterRequired', ...
                     'Required initial result CVF registration failed.');
@@ -269,6 +289,7 @@ for i = 1:n
                 '[PER_CUT %d/%d] run(testCase) final start', i, n);
             append_event(logPath, i, 'RUN_FINAL_START', char(TestCaseName(i)));
             finalResult = run(tc);
+            RunCount(i) = RunCount(i) + 1;
             append_event(logPath, i, 'RUN_FINAL_DONE', char(TestCaseName(i)));
             st_log(cfg, 'DEBUG', ...
                 ['[PER_CUT %d/%d] run(testCase) final complete | ' ...
@@ -290,6 +311,8 @@ for i = 1:n
                     'CoveragePath', coverage_path(row), ...
                     'RequireExactSet', true);
                 ResultFilterStatus(i) = string(attachInfo.Status);
+                ResultFilterAttachCount(i) = ...
+                    ResultFilterAttachCount(i) + 1;
                 if ResultFilterStatus(i) ~= "OK"
                     error('simtest:ResultCoverageFilterRequired', ...
                         'Required final result CVF registration failed.');
@@ -301,6 +324,8 @@ for i = 1:n
         restoreResult = session.Restore();
         restoreSucceeded = all(restoreResult.Status == "OK");
         FilterRestoreStatus(i) = string(restoreResult.Status(1));
+        append_event(logPath, i, 'FILTER_RESTORE', ...
+            char(FilterRestoreStatus(i)));
         append_event(logPath, i, 'RESTORE_DONE', ...
             char(FilterRestoreStatus(i)));
         clear filterCleanup;
@@ -309,9 +334,10 @@ for i = 1:n
                 'Coverage filter restoration did not pass.');
         end
 
-        % Keep Test Manager's transient settings out of result
-        % serialization. CVT/CVF/MLDATX artifacts are created only after
-        % the original Test File filter configuration has been restored.
+        % The general PER_CUT workflow keeps its legacy result assets.  The
+        % standalone pipeline disables this block and packages the live
+        % Result exactly once in its PACKAGE action.
+        if generateResultArtifacts
         append_event(logPath, i, 'EXPORT_INITIAL_START', initialDirectory);
         st_log(cfg, 'DEBUG', ...
             ['[PER_CUT %d/%d] portable result copy start | ' ...
@@ -337,12 +363,6 @@ for i = 1:n
         if ~strcmp(initialInfo.Status, 'OK')
             error('simtest:PerCutInitialReportFailed', ...
                 'Initial report is incomplete: %s', initialInfo.Summary);
-        end
-        if ~applyManagedFiltersDuringRun && ...
-                st_coverage_filter_active(row)
-            verify_result_filter_roundtrip( ...
-                initialInfo, row, CVFPath(i), cfg, 'INITIAL');
-            ResultFilterStatus(i) = "OK";
         end
 
         if RerunPerformed(i)
@@ -372,12 +392,7 @@ for i = 1:n
                 error('simtest:PerCutFinalReportFailed', ...
                     'Final report is incomplete: %s', finalInfo.Summary);
             end
-            if ~applyManagedFiltersDuringRun && ...
-                    st_coverage_filter_active(row)
-                verify_result_filter_roundtrip( ...
-                    finalInfo, row, CVFPath(i), cfg, 'FINAL');
-                ResultFilterStatus(i) = "OK";
-            end
+        end
         end
 
         if upper(FinalOutcome(i)) == "PASSED"
@@ -450,15 +465,37 @@ for i = 1:n
         end
     end
 
-    close_execution_model(row, cfg);
+    [ModelCleanupStatus(i), cleanupMessage] = close_execution_model(row, cfg);
+    append_event(logPath, i, 'MODEL_CLEANUP', cleanupMessage);
+    if ModelCleanupStatus(i) == "FAIL"
+        Status(i) = "FAIL";
+        Message(i) = "Execution model cleanup failed: " + cleanupMessage;
+        if isempty(abortError)
+            abortError = MException('simtest:ExecutionModelCleanupFailed', ...
+                '%s', char(Message(i)));
+        end
+    end
     clear modelPathCleanup;
+    PathCleanupStatus(i) = verify_execution_model_path_cleanup(row);
+    append_event(logPath, i, 'PATH_CLEANUP', ...
+        char(PathCleanupStatus(i)));
+    if PathCleanupStatus(i) == "FAIL"
+        Status(i) = "FAIL";
+        Message(i) = "Execution model path cleanup failed";
+        if isempty(abortError)
+            abortError = MException('simtest:ExecutionModelPathCleanupFailed', ...
+                '%s', char(Message(i)));
+        end
+    end
     DurationSec(i) = toc(rowTimer);
     CompletedAt(i) = timestamp_text();
     targetManifest = build_target_manifest( ...
         runId, i, row, targetDirectory, CVFPath(i), CVFSHA256(i), ...
         CVFRuleCount(i), FilterGenerationStatus(i), ...
         FilterApplyStatus(i), FilterRestoreStatus(i), ...
-        ResultFilterStatus(i), ...
+        ResultFilterStatus(i), RunCount(i), ...
+        ResultFilterAttachCount(i), ModelCleanupStatus(i), ...
+        PathCleanupStatus(i), ...
         InitialOutcome(i), FinalOutcome(i), InitialReport(i), ...
         FinalReport(i), RerunPerformed(i), ExpectedUpdatedCount(i), ...
         Status(i), Message(i), StartedAt(i), CompletedAt(i), ...
@@ -496,21 +533,33 @@ FilterRestoreStatus(~processed) = "NOT_RUN";
 targets = table(No, CUTName, CUTPath, ExecutionModel, StandaloneCUTPath, TestCaseName, ...
     FilterMode, BoundaryMode, FilterAction, FilterRationale, ExistingFilterPolicy, ...
     ManagedFilterApplication, ResultFilterMode, CVFPath, CVFSHA256, ...
-    CVFRuleCount, FilterGenerationStatus, InitialOutcome, FinalOutcome, ...
+    CVFRuleCount, FilterGenerationStatus, RunCount, ...
+    ResultFilterAttachCount, InitialOutcome, FinalOutcome, ...
     InitialReport, FinalReport, ...
     RerunPerformed, ExpectedUpdatedCount, FilterApplyStatus, ...
-    ResultFilterStatus, FilterRestoreStatus, Status, Message, DurationSec, StartedAt, ...
+    ResultFilterStatus, FilterRestoreStatus, ModelCleanupStatus, ...
+    PathCleanupStatus, ...
+    Status, Message, DurationSec, StartedAt, ...
     CompletedAt, TargetManifest);
 if isfile(logPath)
     artifacts(end+1,:) = {0, "ROOT", "LOG", string(logPath), ...
         "OK", "Sequential execution event log"};
 end
 completedAt = timestamp_text();
+if saveTestResult && isempty(abortError)
+    export_aggregate_result(results, resultFile, cfg, logPath);
+    artifacts(end+1,:) = {0, "ROOT", "MLDATX", string(resultFile), ...
+        "OK", "Aggregate Test Manager Result"};
+end
 summary = st_write_per_cut_run_report( ...
     runId, runDirectory, targets, coverage, artifacts, cfg, ...
-    startedAt, completedAt, reportMode);
+    startedAt, completedAt, reportMode, ...
+    'WriteExcel', writeRunSummaryExcel);
 summary.Targets = targets;
 summary.RunScope = runScope;
+summary.EventLog = logPath;
+summary.ResultFile = resultFile;
+summary.ResultSaved = saveTestResult;
 
 if ~isempty(abortError)
     abortError = addCause(abortError, MException( ...
@@ -537,24 +586,37 @@ if failOnNonPass && (any(nonPassMask) || strcmp(summary.Status, 'FAIL'))
 end
 end
 
-function close_execution_model(row, cfg)
+function [status, message] = close_execution_model(row, cfg)
+status = "OK";
+message = "No standalone execution model was loaded";
 if ~ismember('ExecutionModel', row.Properties.VariableNames)
     return;
 end
+
 model = char(string(row.ExecutionModel));
 if isempty(model) || strcmp(model, cfg.TopModel) || ~bdIsLoaded(model)
     return;
 end
 try
-    if strcmp(get_param(model, 'Dirty'), 'on')
-        save_system(model);
-    end
     close_system(model, 0);
+    message = "Standalone execution model closed";
 catch ME
+    status = "FAIL";
+    message = string(ME.message);
     st_log(cfg, 'WARN', ...
         'Standalone execution model close failed | Model=%s | %s', ...
         model, ME.message);
 end
+end
+
+function status = verify_execution_model_path_cleanup(row)
+status = "OK";
+if ~ismember('ExecutionModelFile', row.Properties.VariableNames)
+    return;
+end
+modelFile = char(string(row.ExecutionModelFile));
+if isempty(modelFile), return; end
+if path_contains(fileparts(modelFile)), status = "FAIL"; end
 end
 
 
@@ -639,7 +701,8 @@ end
 function manifest = build_target_manifest( ...
         runId, order, row, targetDirectory, cvfPath, cvfHash, ...
         cvfRuleCount, generationStatus, applyStatus, restoreStatus, ...
-        resultFilterStatus, ...
+        resultFilterStatus, runCount, resultFilterAttachCount, ...
+        modelCleanupStatus, pathCleanupStatus, ...
         initialOutcome, finalOutcome, ...
         initialReport, finalReport, rerunPerformed, updatedCount, ...
         status, message, startedAt, completedAt, durationSec, reportMode, ...
@@ -670,7 +733,11 @@ manifest = struct( ...
     'FilterGenerationStatus', char(string(generationStatus)), ...
     'FilterApplyStatus', char(string(applyStatus)), ...
     'ResultFilterStatus', char(string(resultFilterStatus)), ...
+    'RunCount', double(runCount), ...
+    'ResultFilterAttachCount', double(resultFilterAttachCount), ...
     'FilterRestoreStatus', char(string(restoreStatus)), ...
+    'ModelCleanupStatus', char(string(modelCleanupStatus)), ...
+    'PathCleanupStatus', char(string(pathCleanupStatus)), ...
     'InitialOutcome', char(string(initialOutcome)), ...
     'FinalOutcome', char(string(finalOutcome)), ...
     'InitialSummary', char(string(initialReport)), ...
@@ -735,25 +802,58 @@ if isempty(path)
 end
 end
 
-function verify_result_filter_roundtrip(info, row, cvfPath, cfg, label)
-matches = info.Artifacts.Type == "MLDATX" & ...
-    info.Artifacts.Status == "OK";
-if sum(matches) ~= 1
-    error('simtest:ResultCoverageRoundTripArtifactMissing', ...
-        '%s filtered result export is unavailable.', label);
+function [filterFile, status, ruleCount, filterHash] = ...
+        generate_filter(row, filterDirectory, cfg, logPath, order, ...
+        validateSavedFilter)
+if ~isfolder(filterDirectory)
+    mkdir(filterDirectory);
 end
-resultPath = char(info.Artifacts.Path(matches));
+filterFile = string(st_per_cut_coverage_filter_file(filterDirectory, row));
+append_event(logPath, order, 'CVF_GENERATE', char(filterFile));
 st_log(cfg, 'DEBUG', ...
-    'Result coverage round-trip import start | stage=%s | path=%s', ...
-    label, resultPath);
-imported = sltest.testmanager.importResults(resultPath);
-st_apply_result_coverage_filters(imported, cvfPath, cfg, ...
-    'RequireCoverage', true, ...
-    'CoveragePath', coverage_path(row), ...
-    'RequireExactSet', true, ...
-    'ReadOnly', true);
+    'Coverage filter generation start | TestCase=%s | File=%s', ...
+    char(string(row.TestCaseName)), char(filterFile));
+generated = st_generate_coverage_filter_file( ...
+    row, char(filterFile), cfg, ...
+    'ValidateSavedFilter', validateSavedFilter);
+status = string(generated.Status);
+ruleCount = double(generated.RuleCount);
+if status ~= "OK" || ~isfile(filterFile)
+    error('simtest:PerCutCoverageFilterPreparationFailed', ...
+        'CVF was not generated for %s: %s', ...
+        char(string(row.TestCaseName)), char(string(generated.Message)));
+end
+signature = st_file_signature(filterFile);
+filterHash = string(signature.SHA256);
 st_log(cfg, 'DEBUG', ...
-    'Result coverage round-trip import complete | stage=%s', label);
+    'Coverage filter generation complete | TestCase=%s | Rules=%d', ...
+    char(string(row.TestCaseName)), ruleCount);
+end
+
+function export_aggregate_result(results, resultFile, cfg, logPath)
+finalResults = cell(numel(results), 1);
+for i = 1:numel(results)
+    finalResults{i} = results(i).FinalResult;
+    if isempty(finalResults{i})
+        error('simtest:PerCutAggregateResultIncomplete', ...
+            'Cannot save aggregate Result because target %d has no Result.', i);
+    end
+end
+parent = fileparts(resultFile);
+if ~isempty(parent) && ~isfolder(parent)
+    mkdir(parent);
+end
+append_event(logPath, 0, 'RESULT_EXPORT', resultFile);
+st_log(cfg, 'INFO', ...
+    'Aggregate Test Manager Result export start | Targets=%d | File=%s', ...
+    numel(finalResults), resultFile);
+sltest.testmanager.exportResults([finalResults{:}], resultFile);
+if ~isfile(resultFile)
+    error('simtest:PerCutAggregateResultMissing', ...
+        'Aggregate Result export did not create %s.', resultFile);
+end
+st_log(cfg, 'INFO', ...
+    'Aggregate Test Manager Result export complete | File=%s', resultFile);
 end
 
 function mode = boundary_mode(row)
@@ -810,8 +910,9 @@ if fileId < 0
 end
 cleanup = onCleanup(@() fclose(fileId)); %#ok<NASGU>
 message = strrep(char(string(message)), newline, ' ');
-fprintf(fileId, '%s\t%d\t%s\t%s\n', ...
-    timestamp_text(), order, char(string(event)), message);
+entry = struct('Timestamp', timestamp_text(), 'Order', order, ...
+    'Event', char(string(event)), 'Message', message);
+fprintf(fileId, '%s\n', jsonencode(entry));
 end
 
 
