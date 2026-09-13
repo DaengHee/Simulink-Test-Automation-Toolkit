@@ -236,8 +236,7 @@ if strcmp(executionModelMode, 'STANDALONE_HARNESS')
     standaloneDirectory = fullfile(workspaceDirectory, 'standalone');
     [~, standaloneDetails] = st_export_standalone_harnesses( ...
         cfg.ModelFile, cfg.TopModel, targets, standaloneDirectory, ...
-        stagingDirectory, 'ModelNameMode', 'TARGET_HARNESS', ...
-        'LogConfig', cfg);
+        stagingDirectory, 'LogConfig', cfg);
     finish_step(currentStage, stageTimer);
 end
 

@@ -57,7 +57,7 @@ st_setup
 | 명세서 | `st_export_test_specification.m` | 실행 없이 input, verify, MaxTime, DecisionBlocks를 Excel로 추출 |
 | 내보내기 | `st_export_test_asset_bundle.m` | 선택 결과와 Harness, CVT, CVF, Coverage 자산 복사 |
 | 내보내기 | `st_export_test_bundle.m` | 다른 PC에서 재실행할 수 있는 전체 번들 생성 |
-| Pipeline | `st_run_standalone_coverage_pipeline.m` | standalone Harness 실행·결과 CVF·CUT별 산출물을 단계별 생성/재개 |
+| Pipeline | `st_run_standalone_coverage_pipeline.m` | standalone Harness 실행·결과 CVF·CUT별 산출물을 Action별 생성/재개 |
 | 검증 | `st_verify_all.m` | 환경, 단위, fixture와 실제 모델 종합 검증 |
 | 점검 | `st_check_actual_system.m` | 환경, 실행, CVF 상태를 18비트 코드로 검사 |
 | 점검 | `st_check_per_cut_cvf.m` | 최신 PER_CUT CVF만 6비트 코드로 검사 |
@@ -85,29 +85,27 @@ st_setup
 
 Template clone 설정과 복구 절차는 [harness-template-clone.md](harness-template-clone.md)를 참고한다.
 
-## Standalone Harness Coverage 단계형 실행
+## Standalone Harness Coverage Action 실행
 
-모든 Harness·입력·Assessment·Test Case 준비만 수행하려면 다음 명령을 사용한다.
-
-```matlab
-st_run_standalone_coverage_pipeline('RunMode', 'STEP1');
-```
-
-준비가 끝난 원본에서 standalone export, 작업 Test File 재연결, CUT별 실행,
-결과 CVF 등록, 산출물 정리와 Excel 요약까지 한 번에 수행하려면 다음과 같다.
+Harness·입력·Assessment·Test Case 준비는 기존 workflow에서 완료한다.
 
 ```matlab
-info = st_run_standalone_coverage_pipeline( ...
-    'RunMode', 'STEP2_TO_6', ...
-    'ContinueOnFailure', true, ...
-    'FailOnNonPass', false, ...
-    'ReportMode', 'FULL');
+st_run_from_harness('PreparationMode', 'FORCE', 'ExecuteTests', false);
 ```
 
-`STEP234` 뒤 MATLAB을 종료해도 `STEP5`와 `STEP6`을 `PipelineId='LATEST'`
-또는 반환된 ID로 재개할 수 있다. 각 활성 Targets 행은
+준비가 끝난 Test Case로 실행, 패키징과 Excel 요약을 연속 수행한다.
+
+```matlab
+info = st_run_standalone_coverage_pipeline();
+[code, summary, details] = st_check_standalone_coverage();
+```
+
+다른 MATLAB 세션에서 재개할 때는 `Action='EXECUTE'`를 먼저 실행한다. 이 Action은
+aggregate Result를 기본 저장하며, 이후 `PACKAGE`, `SUMMARY`를 반환된 `PipelineId`로
+실행한다. `ALL`은 live Result를 사용하므로 Result export/import가 없다.
+각 활성 Targets 행은
 `CoverageFilterMode=ALL_CONTENT`, `CoverageBoundaryMode=CUT_ONLY`,
 `CoverageFilterAction=EXCLUDE`와 비어 있지 않은 rationale을 가져야 한다.
-결과 CVF의 등록·API readback·MLDATX export/import readback 중 하나라도 실패하면
-해당 CUT는 실패로 기록된다. 자세한 경계와 결과 구조는
+Test Case별 실행과 CVF 등록은 각각 한 번이어야 하며, checker의 전체 통과 코드는
+`1111111111`이다. 자세한 경계와 결과 구조는
 [standalone-coverage-pipeline.md](standalone-coverage-pipeline.md)를 참고한다.

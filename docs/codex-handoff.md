@@ -6,8 +6,9 @@
 
 ## 현재 기준
 
-- 기준일: 2026-09-09
+- 기준일: 2026-09-14
 - 활성 개발 브랜치: feat/harness-workflow-v2
+- Standalone Action 단순화 작업 시작 기준: 3e5ed63
 - 필수 기능 기준: feat/per-cut-filtered-execution의 7f0825e
 - 필수 handoff 기준: 2b3ba09 이후
 - 필수 진단 기준: 현재 브랜치 최신 커밋의 st_check_actual_system 포함
@@ -148,13 +149,15 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
     SyncOnOpen이고 원본 CUT의 StaticLinkStatus·ReferenceBlock·library 파일 checksum이
     전후 동일한지 확인한다. FILE+MAT는 Atomic 변환을 생략하고, 비-Atomic
     FILE+SLDV/GENERATE는 원본 링크를 바꾸지 않은 채 명시적으로 실패해야 한다.
-20. `st_run_standalone_coverage_pipeline`의 STEP1 prepare-only 회귀, STEP234 뒤 새
-    MATLAB 세션에서 STEP5/STEP6 재개, standalone TC property readback, 결과
-    `cvdata.filter`와 MLDATX export/import readback, 공식 ZIP의 report.html, CVT,
-    `%03d` 폴더와 CoverageSummary.xlsx를 확인한다. Decision/Execution 분모 0은
-    N/A여야 하며 원본 모델·Test File·Excel checksum, Dirty와 Harness inventory가
-    전후 같아야 한다. Test Manager GUI의 Results and Artifacts → Results →
-    Coverage Filters 표시도 수동 증거로 남긴다.
+20. `st_run_standalone_coverage_pipeline`의 `ALL` live Result 경로와 `EXECUTE` 뒤
+    새 MATLAB 세션에서 `PACKAGE`/`SUMMARY`를 재개하는 경로를 모두 확인한다.
+    standalone TC property readback, Test Case별 run 1회와 CVF 등록 1회, 공식 ZIP의
+    root report.html, CVT, `%03d` 폴더와 정확한 7열 CoverageSummary.xlsx를 확인한다.
+    Decision/Execution 분모 0은 N/A여야 하며 원본 모델·Test File·Excel·Input
+    checksum, Dirty와 Harness inventory가 전후 같아야 한다. 최종
+    `st_check_standalone_coverage`가 `1111111111 PASS`인지 확인하고 Test Manager
+    GUI의 Results and Artifacts → Results → Coverage Filters 표시도 수동 증거로
+    남긴다.
 
 실패 시 최소 전달 자료:
 
@@ -328,24 +331,29 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
    커밋으로 반영한다.
 3. CERTIFY + BOTH와 수동 GUI 증거가 끝난 뒤에만 PR과 main 통합을 결정한다.
 
-### 2026-09-11 Standalone Harness Coverage 단계형 pipeline
+### 2026-09-14 Standalone Harness Coverage Action pipeline
 
 - 구현 커밋은 `debff6a`(controller/prepare-only), `5f935d9`(결과 CVF 사후 등록),
   마지막 `feat(report): CUT별 산출물과 Coverage Excel 정리` 순서다.
-- `st_run_standalone_coverage_pipeline`은 `STEP1`, `STEP234`, `STEP5`, `STEP6`,
-  `STEP2_TO_6`을 지원한다. STEP1은 `ExecuteTests=false` override로 기존 준비
-  workflow를 실행하고 기존 entry point의 기본 실행 동작은 유지한다.
-- STEP234는 재현 번들의 standalone Harness 작업 사본과 재연결된 Test File을
+- 이전 단계형 공개 API는 제거했다. `st_run_standalone_coverage_pipeline`은
+  `EXECUTE`, `PACKAGE`, `SUMMARY`, `ALL` Action을 지원하고 기본값은 `ALL`이다.
+  Harness/Test Case/Expected 준비는 `st_run_from_harness`에만 둔다.
+- `EXECUTE`는 재현 번들의 standalone Harness 작업 사본과 재연결된 Test File을
   사용한다. 모든 활성 대상은 ALL_CONTENT+CUT_ONLY+EXCLUDE와 rationale이
   필수다. 일반 PER_CUT 기본은 DURING_RUN을 유지하고 pipeline만
   POST_RUN_REQUIRED를 사용한다.
 - 결과 필터 helper는 cvdata, cv.cvdatagroup, cell 반환을 평탄화하고 filter 절대
-  경로 readback과 decisioninfo/executioninfo를 검증한다. 선택 결과 MLDATX를 다시
-  import한 뒤 filter가 유지되지 않으면 CUT를 실패시킨다.
+  경로 readback과 decisioninfo/executioninfo를 검증한다. 생산 경로의 결과
+  round-trip은 제거하고, `ALL`은 live Result, 별도 `PACKAGE`는 aggregate Result를
+  한 번 import한다.
 - pipeline manifest와 SHA-256은 원자적으로 갱신되며 latest.json으로 재개한다.
-  STEP5는 공유 Test Manager 사본, CUT별 standalone 모델·input·CVF·CVT·공식 ZIP
-  report.html·cvhtml을 만들고 STEP6은 실패 CUT도 포함한 CoverageSummary.xlsx를
-  원자적으로 교체한다.
+  `PACKAGE`는 공유 Test Manager 사본, CUT별 standalone 모델·input·CVF·CVT와
+  공식 ZIP root report.html을 만들고 `SUMMARY`는 정확한 7열
+  CoverageSummary.xlsx를 원자적으로 교체한다. PDF, 별도 cvhtml,
+  TestSummary.xlsx와 coverage-metrics.mat는 만들지 않는다.
+- bundle 실행 후 copied Test File과 copied Top Model을 닫고 caller의 MATLAB path와
+  현재 폴더를 복원한다. 이 상태와 외부 Harness/Input 파일 checksum도 manifest와
+  one-screen checker에서 확인한다.
 - 현재 PC에는 MATLAB과 MISS_HIT 실행 환경이 없어 `git diff --check`와 정적 계약
   검사만 수행할 수 있다. `tests/integration/test_standalone_coverage_pipeline_runtime.m`
   및 위 20번 R2025b/GUI 증거 전에는 main에 통합하지 않는다.
@@ -357,8 +365,8 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   폐기하지 않는다. 수정 후 R2025b 재검증은 아직 미수행이다.
 - 후속 재현에서 실제 최초 로더는 pipeline 진입 시 호출한
   `st_require_runtime_target()`임을 확인했다. 이 함수가 모델을 무조건 로드하던 기존
-  기본 동작은 유지하되 `LoadModel=false` 옵션을 추가하고, STEP1 이외의 standalone
-  pipeline 단계와 bundle exporter는 이 옵션으로 saved target만 검증한다. exporter가
+  기본 동작은 유지하되 `LoadModel=false` 옵션을 추가하고, standalone pipeline과
+  bundle exporter는 이 옵션으로 saved target만 검증한다. exporter가
   최초 상태를 캡처하기 전에 같은 함수로 모델을 로드하지 않도록 함께 변경했다.
   프로젝트와 모델을 열지 않은 실제 사용자 경로에서 R2025b 재검증이 필요하다.
 - 이 수정 적용 후 pipeline은 입력 수집까지 진행했지만, 닫힌 Top Model 아래의
@@ -385,28 +393,27 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   `getCoverageResults`가 빈 결과를 반환하여 모든 CUT가
   `ResultCoverageDataMissing`으로 실패했다. 직접 `run(testCase)` 결과에서 Coverage가
   TestCaseResult/TestIterationResult에만 노출되는 구성도 처리하도록 aggregate가
-  비었을 때 결과 계층을 내려가는 collector를 추가했다. STEP234가 실패하면 기존
-  STEP5가 CUT 폴더의 model/input 복사까지 생략해 Summary와 Test Manager만 남겼으므로,
+  비었을 때 결과 계층을 내려가는 collector를 추가했다. 이전 실행 단계가 실패하면
+  후속 패키징이 CUT 폴더의 model/input 복사까지 생략하던 문제를 확인했으므로,
   이제 standalone 모델·존재하는 입력·target manifest는 필터 결과와 무관하게 먼저
   보존하고 CVF/CVT/report만 검증 성공 시 생성한다. R2025b 재검증이 필요하다.
-- 캡처 한 장으로 반복 실패 상태를 전달하도록
-  `st_print_standalone_coverage_status`를 추가했다. 이 함수는 기존 LATEST manifest와
-  결과를 읽어 코드 중복/수정 flag, STEP 상태, CUT별 작업·최종 파일 존재,
-  root/hierarchy Coverage 객체 수와 축약 오류를 BEGIN/END 한 블록으로 출력한다.
-  ZIP이나 별도 진단 파일은 생성하지 않는다.
-- 첫 실제 STATUS-v1 캡처에서 모든 CUT의 RF/restore와 root/hierarchy Coverage가 1로
-  성공했지만 STEP234 대상 상태는 Initial report incomplete로 FAIL이었다. compact
+- 캡처 한 장으로 상태를 전달하는 기존 출력기는
+  `st_check_standalone_coverage`로 교체했다. manifest v2, lifecycle event, 실제 파일,
+  Excel schema와 원본 checksum을 교차 검사하며 최대 20줄과 10비트 code를 출력한다.
+  전체 통과는 `1111111111`뿐이며 Result import나 model load/save를 수행하지 않는다.
+- 첫 실제 이전 STATUS 캡처에서 모든 CUT의 RF/restore와 root/hierarchy Coverage가 1로
+  성공했지만 실행 대상 상태는 Initial report incomplete로 FAIL이었다. compact
   진단이 원인을 숨기지 않도록 PER_CUT manifest의 FAIL artifact를 type/message별로
   묶어 최대 6개 `AF` 행으로 출력하도록 보강했다.
 - 첫 AF 상세 출력은 main/helper가 `lines(end+1)` 선형 인덱싱으로 서로 다른 모양의
   string row를 만든 뒤 결합되어 R2025b의 ambiguous dimension 오류가 발생했다. 모든
   행 추가를 명시적인 `lines(end+1,1)` column append로 수정했다.
 - 수정된 AF 캡처에서 모든 CUT의 ResultFilter/restore와 Coverage 객체는 성공했고,
-  STEP234 실패는 `COVERAGE_DATA` 4건, `RESULT_INTEGRITY` 4건, read-only cwd의 CVT/HTML
+  당시 실행 실패는 `COVERAGE_DATA` 4건, `RESULT_INTEGRITY` 4건, read-only cwd의 CVT/HTML
   각 3건과 후속 Excel 3건이었다. standalone model-root metadata를 CUT path와 매칭하고,
   cvdata의 불안정한 ID 대신 root/checksum/정규화 CVF로 무결성을 비교한다. CVSAVE와
   CVHTML은 짧은 writable scratch에서 호출하며, bundle PER_CUT 출력 루트도 execution
-  바로 아래 `r`로 줄였다. STEP5의 CVSAVE/CVHTML에도 같은 scratch 처리를 적용했다.
+  바로 아래 `r`로 줄였다. 이 내용은 Action 단순화 전 실패 분석 기록이다.
 
 정적 검증: 변경·추가 MATLAB 파일 중 37개가 MISS_HIT UTF-8 검사에 통과했다.
 Signal Editor의 `import(reader)` 파서 오류는 Import 이전 기준 `7f0825e`에서도

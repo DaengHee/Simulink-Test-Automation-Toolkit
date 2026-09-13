@@ -1,35 +1,28 @@
 function manifest = st_package_standalone_coverage_artifacts( ...
-        outputRoot, manifest, reportMode)
-%ST_PACKAGE_STANDALONE_COVERAGE_ARTIFACTS Build final per-CUT artifacts.
+        outputRoot, manifest, runtimeContext)
+%ST_PACKAGE_STANDALONE_COVERAGE_ARTIFACTS Package each live/imported Result.
 
-cfg = st_require_runtime_target();
+cfg = st_require_runtime_target('LoadModel', false);
 timerValue = tic;
 pipelineRoot = fullfile(outputRoot, char(string(manifest.PipelineId)));
 st_log(cfg, 'INFO', ...
-    'Standalone coverage STEP5 start | PipelineId=%s', ...
+    'Standalone coverage PACKAGE start | PipelineId=%s', ...
     char(string(manifest.PipelineId)));
-require_step(manifest, 'STEP234');
-manifest.Steps.STEP5 = step_state('RUNNING', ...
-    'Packaging filtered result artifacts');
+require_action(manifest, 'EXECUTE');
+require_not_started(manifest, 'PACKAGE');
+manifest.Actions.PACKAGE = action_state('RUNNING', ...
+    'Packaging live or persisted Result objects');
 st_write_standalone_pipeline_manifest(outputRoot, manifest);
 
-testManagerDirectory = fullfile(pipelineRoot, 'TestManager');
-if ~isfolder(testManagerDirectory), mkdir(testManagerDirectory); end
-if ~isfile(manifest.TestManagerWorkFile)
-    error('simtest:StandalonePipelineTestFileMissing', ...
-        'Rewired working Test File is missing: %s', ...
-        char(string(manifest.TestManagerWorkFile)));
-end
-[~, testName, testExtension] = fileparts(manifest.TestManagerWorkFile);
-testManagerPath = fullfile(testManagerDirectory, ...
-    [testName testExtension]);
-copy_checked(manifest.TestManagerWorkFile, testManagerPath);
-manifest.TestManagerFile = testManagerPath;
-manifest.TestManagerSHA256 = st_file_signature(testManagerPath).SHA256;
+[resultRoots, importCount, resultSource] = ...
+    resolve_results(manifest, runtimeContext, cfg);
+manifest.ResultImportCount = importCount;
+manifest.PackageResultSource = resultSource;
+manifest = package_test_file(manifest, pipelineRoot);
 
 for i = 1:numel(manifest.Targets)
     item = manifest.Targets(i);
-    folderName = sprintf('%03d_%s', i, ...
+    folderName = sprintf('%03d_%s', round(double(item.No)), ...
         st_export_safe_name(item.CUTName));
     targetDirectory = fullfile(pipelineRoot, folderName);
     if ~isfolder(targetDirectory), mkdir(targetDirectory); end
@@ -37,155 +30,143 @@ for i = 1:numel(manifest.Targets)
     item.TargetManifest = fullfile(targetDirectory, ...
         'target-manifest.json');
     st_log(cfg, 'INFO', ...
-        '[STEP5 %d/%d] start | CUT=%s', ...
+        '[PACKAGE %d/%d] start | CUT=%s', ...
         i, numel(manifest.Targets), item.CUTName);
     try
-        item = package_execution_inputs(item, targetDirectory, cfg);
+        if strcmpi(item.ExecutionStatus, 'FAIL')
+            error('simtest:StandalonePipelineExecuteTargetFailed', ...
+                'EXECUTE did not satisfy the target lifecycle contract.');
+        end
+        resultObj = resolve_target_result(resultRoots, item);
+        item = package_target(item, resultObj, targetDirectory, ...
+            pipelineRoot, cfg);
+        item.PackageStatus = 'OK';
+        st_log(cfg, 'INFO', ...
+            '[PACKAGE %d/%d] complete | CUT=%s', ...
+            i, numel(manifest.Targets), item.CUTName);
     catch ME
-        item.Step5Status = 'FAIL';
+        item.PackageStatus = 'FAIL';
         item.Message = append_message(item.Message, ...
             sprintf('%s: %s', ME.identifier, ME.message));
-        write_target_manifest(item.TargetManifest, item);
-        manifest.Targets(i) = item;
         st_log(cfg, 'ERROR', ...
-            ['[STEP5 %d/%d] standalone inputs packaging failed | ' ...
-             'CUT=%s | %s: %s'], ...
-            i, numel(manifest.Targets), item.CUTName, ...
-            ME.identifier, ME.message);
-        continue;
-    end
-    if strcmpi(item.Step234Status, 'FAIL') || ...
-            ~strcmpi(item.ResultFilterStatus, 'OK')
-        item.Step5Status = 'SKIP';
-        item.Message = append_message(item.Message, ...
-            ['STEP5 skipped because STEP234 did not produce ' ...
-             ['a verified filtered result; standalone model and input ' ...
-              'were preserved for diagnosis']]);
-        write_target_manifest(item.TargetManifest, item);
-        manifest.Targets(i) = item;
-        st_log(cfg, 'WARN', ...
-            ['[STEP5 %d/%d] filtered artifacts skipped; standalone ' ...
-             'inputs preserved | CUT=%s'], ...
-            i, numel(manifest.Targets), item.CUTName);
-        continue;
-    end
-    try
-        item = package_target(item, targetDirectory, pipelineRoot, ...
-            reportMode, cfg);
-        item.Step5Status = 'OK';
-        write_target_manifest(item.TargetManifest, item);
-        st_log(cfg, 'INFO', ...
-            '[STEP5 %d/%d] complete | CUT=%s', ...
-            i, numel(manifest.Targets), item.CUTName);
-    catch ME
-        item.Step5Status = 'FAIL';
-        item.Message = sprintf('%s: %s', ME.identifier, ME.message);
-        write_target_manifest(item.TargetManifest, item);
-        st_log(cfg, 'ERROR', ...
-            '[STEP5 %d/%d] failed | CUT=%s | %s: %s', ...
+            '[PACKAGE %d/%d] failed | CUT=%s | %s: %s', ...
             i, numel(manifest.Targets), item.CUTName, ...
             ME.identifier, ME.message);
     end
+    write_target_manifest(item.TargetManifest, item);
     manifest.Targets(i) = item;
     manifest.UpdatedAt = timestamp_text();
     st_write_standalone_pipeline_manifest(outputRoot, manifest);
 end
 
-values = upper(string({manifest.Targets.Step5Status}));
-if any(values == "FAIL" | values == "SKIP")
-    finalStatus = 'WARN';
-else
-    finalStatus = 'OK';
-end
-manifest.Steps.STEP5 = step_state(finalStatus, ...
-    'Per-CUT standalone coverage artifacts packaged');
+status = target_action_status(manifest.Targets, 'PackageStatus');
+manifest.Actions.PACKAGE = action_state(status, ...
+    'Model, Input, CVF, CVT, and one HTML report packaged per target');
 manifest.Status = pipeline_status(manifest);
 manifest.UpdatedAt = timestamp_text();
 st_log(cfg, 'INFO', ...
-    'Standalone coverage STEP5 complete | elapsed=%.3f sec', ...
-    toc(timerValue));
+    'Standalone coverage PACKAGE complete | Status=%s | elapsed=%.3f sec', ...
+    status, toc(timerValue));
 end
 
-function value = append_message(existing, added)
-if isempty(existing)
-    value = added;
-else
-    value = [existing ' | ' added];
+function [roots, importCount, source] = resolve_results(manifest, context, cfg)
+importCount = 0;
+source = '';
+if isstruct(context) && isfield(context, 'Results') && ...
+        ~isempty(context.Results)
+    raw = context.Results;
+    roots = cell(numel(raw),1);
+    for i = 1:numel(raw)
+        roots{i} = raw(i).FinalResult;
+    end
+    st_log(cfg, 'DEBUG', ...
+        'PACKAGE is using live Result objects | Targets=%d', numel(roots));
+    source = 'LIVE';
+    return;
 end
+if ~isfield(manifest, 'CanResumePackage') || ...
+        ~logical(manifest.CanResumePackage) || ...
+        ~isfield(manifest, 'ResultFile') || ...
+        ~isfile(char(string(manifest.ResultFile)))
+    error('simtest:StandalonePipelineResultUnavailable', ...
+        ['PACKAGE requires live Result objects from ALL or an EXECUTE run ' ...
+         'created with SaveTestResult=true.']);
+end
+signature = st_file_signature(manifest.ResultFile);
+if ~strcmpi(signature.SHA256, char(string(manifest.ResultSHA256)))
+    error('simtest:StandalonePipelineResultChecksumMismatch', ...
+        'Saved aggregate Result checksum changed: %s', manifest.ResultFile);
+end
+st_log(cfg, 'INFO', ...
+    'PACKAGE aggregate Result import start | File=%s', manifest.ResultFile);
+imported = sltest.testmanager.importResults(manifest.ResultFile);
+importCount = 1;
+source = 'IMPORTED';
+roots = cell(numel(imported),1);
+for i = 1:numel(imported), roots{i} = imported(i); end
+st_log(cfg, 'INFO', ...
+    'PACKAGE aggregate Result import complete | Roots=%d', numel(roots));
 end
 
-function item = package_target(item, targetDirectory, pipelineRoot, ...
-        reportMode, cfg)
-pathCleanup = register_target_folder(targetDirectory); %#ok<NASGU>
-
-sourceCVF = item.CVFPath;
-if isfield(item, 'ExecutionCVFPath') && ...
-        ~isempty(item.ExecutionCVFPath)
-    sourceCVF = item.ExecutionCVFPath;
+function resultObj = resolve_target_result(roots, item)
+matches = false(numel(roots),1);
+for i = 1:numel(roots)
+    cases = st_collect_test_case_results(roots{i});
+    names = strings(numel(cases),1);
+    for j = 1:numel(cases)
+        try, names(j) = string(cases{j}.Name); catch, end
+    end
+    matches(i) = any(names == string(item.TestCaseName));
 end
+indices = find(matches);
+if numel(indices) ~= 1
+    error('simtest:StandalonePipelineResultMappingAmbiguous', ...
+        'Expected one Result root for Test Case %s, found %d.', ...
+        item.TestCaseName, numel(indices));
+end
+resultObj = roots{indices};
+end
+
+function manifest = package_test_file(manifest, pipelineRoot)
+testManagerDirectory = fullfile(pipelineRoot, 'TestManager');
+if ~isfolder(testManagerDirectory), mkdir(testManagerDirectory); end
+if ~isfile(manifest.TestManagerWorkFile)
+    error('simtest:StandalonePipelineTestFileMissing', ...
+        'Rewired working Test File is missing: %s', ...
+        char(string(manifest.TestManagerWorkFile)));
+end
+[~, name, extension] = fileparts(manifest.TestManagerWorkFile);
+destination = fullfile(testManagerDirectory, [name extension]);
+copy_checked(manifest.TestManagerWorkFile, destination);
+manifest.TestManagerFile = destination;
+manifest.TestManagerSHA256 = st_file_signature(destination).SHA256;
+end
+
+function item = package_target(item, resultObj, targetDirectory, ...
+        pipelineRoot, cfg)
+item = package_execution_inputs(item, targetDirectory, cfg);
+sourceCVF = item.ExecutionCVFPath;
 if ~isfile(sourceCVF)
     error('simtest:StandalonePipelineCVFMissing', ...
         'Generated CVF is missing: %s', sourceCVF);
 end
 finalCVF = fullfile(targetDirectory, ...
     [st_export_safe_name(item.CUTName) '_CoverageFilter.cvf']);
-if ~same_path(sourceCVF, finalCVF)
-    copy_checked(sourceCVF, finalCVF);
-end
-item.CVFPath = finalCVF;
-item.CVFSHA256 = st_file_signature(finalCVF).SHA256;
+copy_checked(sourceCVF, finalCVF);
+item.PackagedCVF = finalCVF;
+item.PackagedCVFSHA256 = st_file_signature(finalCVF).SHA256;
 
-rawResult = selected_result_file(item);
-roundtripDirectory = fullfile(pipelineRoot, '.work', ...
-    'roundtrip', sprintf('%03d_%s', item.Order, ...
-    st_export_safe_name(item.CUTName)));
-if ~isfolder(roundtripDirectory), mkdir(roundtripDirectory); end
-filteredResult = fullfile(roundtripDirectory, 'FilteredResults.mldatx');
-delete_if_present(filteredResult);
-
-st_log(cfg, 'DEBUG', ...
-    'STEP5 result import start | CUT=%s | Result=%s', ...
-    item.CUTName, rawResult);
-resultObj = sltest.testmanager.importResults(rawResult);
-if numel(resultObj) ~= 1
-    error('simtest:StandalonePipelineResultImportAmbiguous', ...
-        'Expected one imported ResultSet, found %d.', numel(resultObj));
-end
-st_apply_result_coverage_filters(resultObj, finalCVF, cfg, ...
-    'RequireCoverage', true, ...
-    'CoveragePath', item.StandaloneCUTPath, ...
-    'RequireExactSet', true);
-sltest.testmanager.exportResults(resultObj, filteredResult);
-if ~isfile(filteredResult)
-    error('simtest:StandalonePipelineResultExportMissing', ...
-        'Filtered result export was not created: %s', filteredResult);
-end
-roundtripResult = sltest.testmanager.importResults(filteredResult);
-if numel(roundtripResult) ~= 1
-    error('simtest:StandalonePipelineResultRoundTripAmbiguous', ...
-        'Expected one round-trip ResultSet, found %d.', ...
-        numel(roundtripResult));
-end
-st_apply_result_coverage_filters(roundtripResult, finalCVF, cfg, ...
-    'RequireCoverage', true, ...
-    'CoveragePath', item.StandaloneCUTPath, ...
-    'RequireExactSet', true, ...
-    'ReadOnly', true);
-st_log(cfg, 'DEBUG', ...
-    'STEP5 result import/readback complete | CUT=%s', item.CUTName);
-
-coverageObjects = st_collect_result_coverage_objects(roundtripResult);
+coverageObjects = st_collect_result_coverage_objects(resultObj);
 if isempty(coverageObjects)
     error('simtest:StandalonePipelineCoverageMissing', ...
-        'Round-trip result contains no coverage objects.');
+        'Result contains no coverage objects.');
 end
-
 cvtPath = fullfile(targetDirectory, ...
     [st_export_safe_name(item.CUTName) '_CoverageResult.cvt']);
 delete_if_present(cvtPath);
-st_log(cfg, 'DEBUG', 'STEP5 cvsave start | CUT=%s', item.CUTName);
+st_log(cfg, 'DEBUG', 'PACKAGE cvsave start | CUT=%s', item.CUTName);
 save_cvt(cvtPath, coverageObjects, cfg);
-st_log(cfg, 'DEBUG', 'STEP5 cvsave complete | CUT=%s', item.CUTName);
+st_log(cfg, 'DEBUG', 'PACKAGE cvsave complete | CUT=%s', item.CUTName);
 item.CoverageResult = cvtPath;
 item.CoverageResultSHA256 = st_file_signature(cvtPath).SHA256;
 
@@ -193,127 +174,124 @@ reportDirectory = fullfile(targetDirectory, ...
     [st_export_safe_name(item.CUTName) '_TestReport']);
 if isfolder(reportDirectory), rmdir(reportDirectory, 's'); end
 mkdir(reportDirectory);
-zipPath = fullfile(roundtripDirectory, 'TestReport.zip');
+zipDirectory = fullfile(pipelineRoot, '.work', 'package');
+if ~isfolder(zipDirectory), mkdir(zipDirectory); end
+zipPath = fullfile(zipDirectory, sprintf('%03d_TestReport.zip', ...
+    round(double(item.No))));
 delete_if_present(zipPath);
 st_log(cfg, 'DEBUG', ...
-    'STEP5 Test Manager ZIP report start | CUT=%s', item.CUTName);
-sltest.testmanager.report(roundtripResult, zipPath, ...
+    'PACKAGE Test Manager HTML report start | CUT=%s', item.CUTName);
+sltest.testmanager.report(resultObj, zipPath, ...
     'Title', [item.CUTName ' Test Report'], ...
     'IncludeMLVersion', true, ...
     'IncludeTestResults', int32(0), ...
-    'IncludeCoverageResult', strcmpi(reportMode, 'FULL'), ...
+    'IncludeCoverageResult', true, ...
     'IncludeSimulationMetadata', true, ...
     'LaunchReport', false);
 unzip(zipPath, reportDirectory);
 ensure_report_html(reportDirectory);
-st_log(cfg, 'DEBUG', ...
-    'STEP5 Test Manager ZIP report complete | CUT=%s', item.CUTName);
-coverageDirectory = fullfile(reportDirectory, 'coverage');
-if ~isfolder(coverageDirectory), mkdir(coverageDirectory); end
-st_log(cfg, 'DEBUG', ...
-    'STEP5 cvhtml start | CUT=%s | Objects=%d', ...
-    item.CUTName, numel(coverageObjects));
-for i = 1:numel(coverageObjects)
-    path = fullfile(coverageDirectory, sprintf('%02d_coverage.html', i));
-    writableCleanup = st_enter_writable_coverage_directory(cfg, 'CVHTML');
-    cvhtml(path, coverageObjects{i}, '-sRT=0');
-    clear writableCleanup;
-end
-st_log(cfg, 'DEBUG', 'STEP5 cvhtml complete | CUT=%s', item.CUTName);
 item.TestReport = reportDirectory;
+item.ReportHTML = fullfile(reportDirectory, 'report.html');
+st_log(cfg, 'DEBUG', ...
+    'PACKAGE Test Manager HTML report complete | CUT=%s', item.CUTName);
 
-targetTable = table(item.No, string(item.CUTName), ...
-    string(item.CUTPath), string(item.TestCaseName), ...
-    string(item.StandaloneCUTPath), ...
+target = table(item.No, string(item.CUTName), string(item.CUTPath), ...
+    string(item.TestCaseName), string(item.StandaloneCUTPath), ...
     'VariableNames', {'No','CUTName','CUTPath','TestCaseName', ...
     'StandaloneCUTPath'});
-metrics = st_collect_coverage_summary( ...
-    roundtripResult, targetTable, 'FILTERED_FINAL', ...
-    'IncludeTestDetails', false, 'MatchCoverageObjects', true);
-metricSnapshot = fullfile(roundtripDirectory, 'coverage-metrics.mat');
-save(metricSnapshot, 'metrics');
-item.MetricSnapshot = metricSnapshot;
-item.MetricSnapshotSHA256 = st_file_signature(metricSnapshot).SHA256;
-item = assign_metric(item, metrics, 'Decision');
-item = assign_metric(item, metrics, 'Execution');
+metrics = st_collect_final_cut_coverage_metrics( ...
+    resultObj, target, 'LogConfig', cfg);
+item = assign_metric(item, metrics.Decision, 'Decision');
+item = assign_metric(item, metrics.Execution, 'Execution');
+item.MetricSource = metrics.Source;
+item.MetricSourceStatus = metrics.SourceStatus;
+if strcmp(metrics.SourceStatus, 'AMBIGUOUS')
+    error('simtest:StandalonePipelineMetricAmbiguous', ...
+        'Coverage metric source is ambiguous for %s.', item.CUTName);
+end
 end
 
 function item = package_execution_inputs(item, targetDirectory, cfg)
 st_log(cfg, 'DEBUG', ...
-    'STEP5 standalone inputs packaging start | CUT=%s', item.CUTName);
+    'PACKAGE standalone inputs start | CUT=%s', item.CUTName);
 if ~isfile(item.StandaloneModelFile)
     error('simtest:StandalonePipelineModelMissing', ...
         'Standalone model is missing: %s', item.StandaloneModelFile);
 end
-[~, modelName, modelExtension] = fileparts(item.StandaloneModelFile);
-modelDestination = fullfile(targetDirectory, ...
-    [modelName modelExtension]);
+[~, modelName, extension] = fileparts(item.StandaloneModelFile);
+if ~strcmp(modelName, item.HarnessName) || ...
+        ~strcmp(modelName, item.StandaloneModel)
+    error('simtest:StandalonePipelineModelNameMismatch', ...
+        'Harness, standalone model, and file stem must match for %s.', ...
+        item.CUTName);
+end
+modelDestination = fullfile(targetDirectory, [modelName extension]);
 copy_checked(item.StandaloneModelFile, modelDestination);
 item.PackagedStandaloneModel = modelDestination;
-item.PackagedStandaloneModelSHA256 = ...
-    st_file_signature(modelDestination).SHA256;
 
-if ~isempty(item.SignalEditorInput)
+if isempty(item.SignalEditorInput)
+    item.PackagedInputReadbackStatus = 'NOT_REQUIRED';
+else
     if ~isfile(item.SignalEditorInput)
         error('simtest:StandalonePipelineInputMissing', ...
             'Standalone input is missing: %s', item.SignalEditorInput);
     end
+    [~, inputName, inputExtension] = fileparts(item.SignalEditorInput);
     inputDestination = fullfile(targetDirectory, ...
-        [st_export_safe_name(item.CUTName) '_Input.mat']);
+        [inputName inputExtension]);
     copy_checked(item.SignalEditorInput, inputDestination);
     item.PackagedInput = inputDestination;
-    item.PackagedInputSHA256 = ...
-        st_file_signature(inputDestination).SHA256;
+    item.PackagedInputSHA256 = st_file_signature(inputDestination).SHA256;
+    item = rewire_packaged_input(item, [inputName inputExtension], cfg);
 end
+item.PackagedStandaloneModelSHA256 = ...
+    st_file_signature(modelDestination).SHA256;
 st_log(cfg, 'DEBUG', ...
-    'STEP5 standalone inputs packaging complete | CUT=%s', item.CUTName);
+    'PACKAGE standalone inputs complete | CUT=%s', item.CUTName);
 end
 
-function cleanup = register_target_folder(folder)
-cleanup = [];
-entries = string(strsplit(path, pathsep));
-for i = 1:numel(entries)
-    if strlength(entries(i)) > 0 && same_path(entries(i), folder)
-        return;
-    end
+function item = rewire_packaged_input(item, relativeInput, cfg)
+modelFile = item.PackagedStandaloneModel;
+modelName = item.StandaloneModel;
+folder = fileparts(modelFile);
+previousDirectory = pwd;
+cleanup = onCleanup(@() restore_model_context( ...
+    modelName, previousDirectory)); %#ok<NASGU>
+cd(folder);
+if bdIsLoaded(modelName)
+    error('simtest:StandalonePipelineModelIsolationFailed', ...
+        'Model %s is already loaded before PACKAGE readback.', modelName);
 end
-addpath(folder, '-begin');
-cleanup = onCleanup(@() remove_path_quietly(folder));
+load_system(modelFile);
+block = st_find_signal_editor_block(modelName);
+set_param(block, 'Filename', relativeInput);
+save_system(modelName);
+actual = char(string(get_param(block, 'Filename')));
+if ~strcmp(actual, relativeInput)
+    error('simtest:StandalonePipelineInputReadbackFailed', ...
+        'Packaged Input path readback failed for %s.', item.CUTName);
+end
+close_system(modelName, 0);
+item.PackagedInputReadbackStatus = 'OK';
+st_log(cfg, 'DEBUG', ...
+    'PACKAGE relative Input readback complete | CUT=%s | Input=%s', ...
+    item.CUTName, relativeInput);
 end
 
-function remove_path_quietly(folder)
-try, rmpath(folder); catch, end
+function restore_model_context(modelName, directory)
+try
+    if bdIsLoaded(modelName), close_system(modelName, 0); end
+catch
+end
+cd(directory);
 end
 
-function rawResult = selected_result_file(item)
-listing = dir(fullfile(item.SelectedResultDirectory, 'raw', ...
-    '*Results.mldatx'));
-if numel(listing) ~= 1
-    error('simtest:StandalonePipelineSelectedResultMissing', ...
-        'Expected one selected result under %s.', ...
-        item.SelectedResultDirectory);
-end
-rawResult = fullfile(listing(1).folder, listing(1).name);
-end
-
-function item = assign_metric(item, metrics, metricName)
-rows = metrics.Level == "CUT" & ...
-    strcmpi(metrics.Metric, metricName) & metrics.Status == "OK";
-prefix = metricName;
-if ~any(rows)
-    item.([prefix 'Covered']) = NaN;
-    item.([prefix 'Total']) = NaN;
-    item.([prefix 'Percentage']) = NaN;
-    item.([prefix 'PercentageText']) = 'N/A';
-    return;
-end
-row = metrics(find(rows, 1),:);
-item.([prefix 'Covered']) = double(row.Covered);
-item.([prefix 'Total']) = double(row.Total);
-[percentage, percentageText] = st_coverage_percentage( ...
-    row.Covered, row.Total);
-item.([prefix 'Percentage']) = percentage;
-item.([prefix 'PercentageText']) = char(percentageText);
+function item = assign_metric(item, metric, name)
+item.([name 'Covered']) = double(metric.Covered);
+item.([name 'Total']) = double(metric.Total);
+item.([name 'Percentage']) = double(metric.Percentage);
+item.([name 'PercentageText']) = char(string(metric.PercentageText));
+item.([name 'MetricStatus']) = char(string(metric.Status));
 end
 
 function save_cvt(path, objects, cfg)
@@ -359,6 +337,24 @@ if ~isfile(rootReport)
 end
 end
 
+function require_action(manifest, name)
+if double(manifest.Version) ~= 2 || ~isfield(manifest, 'Actions') || ...
+        ~isfield(manifest.Actions, name) || ...
+        ~ismember(upper(string(manifest.Actions.(name).Status)), ["OK","WARN"])
+    error('simtest:StandalonePipelineActionNotReady', ...
+        '%s must complete before PACKAGE.', name);
+end
+end
+
+function require_not_started(manifest, name)
+if ~isfield(manifest, 'Actions') || ~isfield(manifest.Actions, name) || ...
+        ~strcmpi(char(string(manifest.Actions.(name).Status)), 'NOT_RUN')
+    error('simtest:StandalonePipelineActionAlreadyStarted', ...
+        ['%s can run only once per pipeline. Start a new EXECUTE action ' ...
+         'instead of regenerating lifecycle artifacts.'], name);
+end
+end
+
 function copy_checked(source, destination)
 parent = fileparts(destination);
 if ~isfolder(parent), mkdir(parent); end
@@ -366,20 +362,6 @@ if ~isfolder(parent), mkdir(parent); end
 if ~ok || ~isfile(destination)
     error('simtest:StandalonePipelineCopyFailed', ...
         'Cannot copy %s to %s: %s', source, destination, message);
-end
-end
-
-function tf = same_path(left, right)
-left = char(java.io.File(char(left)).getCanonicalPath());
-right = char(java.io.File(char(right)).getCanonicalPath());
-if ispc, tf = strcmpi(left, right); else, tf = strcmp(left, right); end
-end
-
-function require_step(manifest, name)
-if ~isfield(manifest, 'Steps') || ~isfield(manifest.Steps, name) || ...
-        ~ismember(upper(string(manifest.Steps.(name).Status)), ["OK","WARN"])
-    error('simtest:StandalonePipelineStageNotReady', ...
-        '%s must complete before STEP5.', name);
 end
 end
 
@@ -405,21 +387,34 @@ function delete_if_present(path)
 if isfile(path), delete(path); end
 end
 
-function value = step_state(status, message)
+function value = append_message(existing, added)
+if isempty(existing), value = added; else, value = [existing ' | ' added]; end
+end
+
+function value = action_state(status, message)
 value = struct('Status', status, 'Message', message, ...
     'UpdatedAt', timestamp_text());
 end
 
+function status = target_action_status(targets, field)
+values = upper(string({targets.(field)}));
+if any(values == "FAIL" | values == "SKIP")
+    status = 'WARN';
+else
+    status = 'OK';
+end
+end
+
 function status = pipeline_status(manifest)
-names = fieldnames(manifest.Steps);
+names = fieldnames(manifest.Actions);
 values = strings(numel(names),1);
 for i = 1:numel(names)
-    values(i) = string(manifest.Steps.(names{i}).Status);
+    values(i) = upper(string(manifest.Actions.(names{i}).Status));
 end
 if any(values == "FAIL")
     status = 'FAIL';
-elseif any(values == "WARN") || any(values == "NOT_RUN")
-    status = 'WARN';
+elseif any(values == "WARN" | values == "NOT_RUN")
+    status = 'PARTIAL';
 else
     status = 'OK';
 end

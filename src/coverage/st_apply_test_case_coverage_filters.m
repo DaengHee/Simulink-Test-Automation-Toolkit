@@ -157,20 +157,25 @@ try
             filters = manualFilters{i};
         end
         if st_coverage_filter_active(row)
-            expectedFile = char(filterFiles(i));
-            if isempty(expectedFile)
-                expectedFile = st_coverage_filter_file(row, cfg);
-            end
-            if isfile(expectedFile)
-                FilterFile(i) = string(expectedFile);
-                if applyManagedFiltersDuringRun
+            if applyManagedFiltersDuringRun
+                expectedFile = char(filterFiles(i));
+                if isempty(expectedFile)
+                    expectedFile = st_coverage_filter_file(row, cfg);
+                end
+                if isfile(expectedFile)
+                    FilterFile(i) = string(expectedFile);
                     filters(end+1,1) = string(expectedFile); %#ok<AGROW>
+                else
+                    st_log(cfg, 'WARN', ...
+                        ['Coverage filter file is absent; Test Case will run ' ...
+                         'without an automatic filter | TestCase=%s | File=%s'], ...
+                        char(caseNames(i)), expectedFile);
                 end
             else
-                st_log(cfg, 'WARN', ...
-                    ['Coverage filter file is absent; Test Case will run ' ...
-                     'without an automatic filter | TestCase=%s | File=%s'], ...
-                    char(caseNames(i)), expectedFile);
+                % The standalone workflow creates its managed CVF from the
+                % Result SID namespace after run(tc).  Do not resolve or
+                % require a pre-existing managed file here.
+                FilterFile(i) = "DEFERRED";
             end
         end
 
@@ -179,12 +184,11 @@ try
             filter_property_value(filters);
         AppliedFilterCount(i) = numel(filters);
         Status(i) = "OK";
-        if strlength(FilterFile(i)) > 0
+        if FilterFile(i) == "DEFERRED"
+            Message(i) = "Automatic filter deferred to result coverage data";
+        elseif strlength(FilterFile(i)) > 0
             if applyManagedFiltersDuringRun
                 Message(i) = "Automatic per-Test-Case filter applied";
-            else
-                Message(i) = ...
-                    "Automatic filter deferred to result coverage data";
             end
         elseif ~st_coverage_filter_active(row)
             Message(i) = "Automatic coverage filter disabled";
