@@ -2,10 +2,12 @@
 
 ## 해보실 것 (순서대로)
 
-1. **에러 발생 시 멈추도록 설정** (이번 1번만, 새로 켠 MATLAB에서 딱 한 번):
+1. **정확히 이 오류에서만 멈추도록 설정** (이번 1번만):
 ```matlab
-dbstop if caught error
+dbclear all
+dbstop if caught error Slvnv:simcoverage:cvhtml:ModelNotOpen
 ```
+(`dbstop if caught error`만 쓰면 관련 없는 다른 캐치 오류에서도 다 멈추니, 반드시 위처럼 오류 ID를 붙여주세요.)
 
 2. **모델 닫기** (1.5단계, 2단계 실행 전 필수):
 ```matlab
