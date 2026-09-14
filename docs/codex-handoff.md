@@ -389,7 +389,12 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   MATLAB path에 추가하지 않는다. PACKAGE는 launcher를 TestManager folder에 함께
   제공해 model path/load와 packaged CVF Test Case readback 후 GUI를 열도록 보강했다.
   실행 때 Result coverage object에 CVF를 사후 연결하는 방식은 공식 `cvdata.filter`
-  API의 지원 범위다. capture는 이제 HTML 직전에 그 readback을 다시 강제한다.
+  API의 지원 범위다. 다만 R2025b 실제 실행에서 Result hierarchy를 다시 조회하면
+  새 `cvdata` 객체가 materialize되어 앞서 등록한 filter readback이 비어 보였다.
+  이전 객체가 비었다는 이유만으로 EXECUTE를 실패시키는 검증은 제거했다. capture는
+  CVSAVE/CVHTML/metric에 실제로 넘길 새 객체에 CVF를 다시 bind하고 그 즉시 readback한
+  뒤 진행한다. 새 `ALL`에서 `Standalone original Coverage report CVF binding complete`
+  로그와 CVF의 Excluded/Justified HTML 표시를 확인해야 한다.
 - 실제 R2025b에서 사용자가 Top Model을 열지 않았는데도 target 입력 수집 후
   `StandaloneModelStillLoadedBeforeRun`이 발생했다. export 중간 상태가 아니라
   `st_export_test_bundle` 진입 전 load 상태를 기준으로 dependency/Harness API가

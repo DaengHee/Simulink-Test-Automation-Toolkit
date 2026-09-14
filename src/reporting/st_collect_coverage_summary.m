@@ -7,6 +7,7 @@ addParameter(p, 'IncludeTestDetails', true, ...
     @(x) islogical(x) && isscalar(x));
 addParameter(p, 'MatchCoverageObjects', false, ...
     @(x) islogical(x) && isscalar(x));
+addParameter(p, 'CoverageObjects', {}, @(x) iscell(x));
 addParameter(p, 'ProgressFcn', [], ...
     @(x) isempty(x) || isa(x, 'function_handle'));
 parse(p, varargin{:});
@@ -15,7 +16,12 @@ matchCoverageObjects = p.Results.MatchCoverageObjects;
 progressFcn = p.Results.ProgressFcn;
 
 coverage = empty_coverage_table();
-resultCoverage = st_collect_result_coverage_objects(resultObj);
+resultCoverage = p.Results.CoverageObjects;
+if isempty(resultCoverage)
+    resultCoverage = st_collect_result_coverage_objects(resultObj);
+else
+    resultCoverage = resultCoverage(:);
+end
 resultDescriptors = describe_coverage_objects(resultCoverage);
 
 % Overall CUT rows come from the aggregated ResultSet coverage so repeated

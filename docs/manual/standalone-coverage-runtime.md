@@ -215,10 +215,12 @@ Test Manager의 Refresh/All이 `..._Harness1`을 찾지 못하면 launcher 출�
 
 ## 7. 원본 HTML의 CVF 적용 근거
 
-PIPELINE은 Test Manager 실행 뒤 `cvdata.filter`에 CVF를 붙이고, 그 동일 Coverage
-object로 `cvhtml`을 생성한다. 아래 표에서 active CUT의 `CVFRuleCount`,
+PIPELINE은 Test Manager 실행 뒤 결과 Coverage에 CVF를 붙인다. Test Manager가 결과를
+다시 조회할 때 새 `cvdata` 객체를 만들 수 있으므로, `cvhtml`에 넘길 객체에도 CVF를
+직접 다시 바인딩한 뒤 보고서를 생성한다. 아래 표에서 active CUT의 `CVFRuleCount`,
 `ResultFilterAttachCount`, `ResultFilterStatus`가 각각 `0보다 큼`, `1`, `OK`이면
-원본 HTML 생성 전에 CVF readback이 완료된 것이다.
+원본 HTML 생성 전에 CVF 바인딩 readback이 완료된 것이다. 실행 로그에는
+`Standalone original Coverage report CVF binding complete`가 남는다.
 
 ```matlab
 [m, ~] = st_load_standalone_pipeline_manifest( ...
