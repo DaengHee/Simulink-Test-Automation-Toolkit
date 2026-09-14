@@ -18,7 +18,7 @@ st_write_standalone_pipeline_manifest(outputRoot, manifest);
     resolve_results(manifest, runtimeContext, cfg);
 manifest.ResultImportCount = importCount;
 manifest.PackageResultSource = resultSource;
-manifest = package_test_file(manifest, pipelineRoot);
+manifest = package_test_file(manifest, pipelineRoot, cfg);
 
 for i = 1:numel(manifest.Targets)
     item = manifest.Targets(i);
@@ -45,6 +45,7 @@ for i = 1:numel(manifest.Targets)
             i, numel(manifest.Targets), item.CUTName);
     catch ME
         item.PackageStatus = 'FAIL';
+        item.PackageFailure = package_failure_detail(ME);
         item.Message = append_message(item.Message, ...
             sprintf('%s: %s', ME.identifier, ME.message));
         st_log(cfg, 'ERROR', ...
@@ -126,7 +127,7 @@ end
 resultObj = roots{indices};
 end
 
-function manifest = package_test_file(manifest, pipelineRoot)
+function manifest = package_test_file(manifest, pipelineRoot, cfg)
 testManagerDirectory = fullfile(pipelineRoot, 'TestManager');
 if ~isfolder(testManagerDirectory), mkdir(testManagerDirectory); end
 if ~isfile(manifest.TestManagerWorkFile)
@@ -139,9 +140,24 @@ destination = fullfile(testManagerDirectory, [name extension]);
 copy_checked(manifest.TestManagerWorkFile, destination);
 manifest.TestManagerFile = destination;
 manifest.TestManagerSHA256 = st_file_signature(destination).SHA256;
+launcherSource = fullfile(st_project_root(), 'resources', ...
+    'standalone_coverage', 'open_standalone_coverage_test_manager.m');
+if ~isfile(launcherSource)
+    error('simtest:StandalonePipelineTestManagerLauncherMissing', ...
+        'Packaged Test Manager launcher template is missing: %s', ...
+        launcherSource);
+end
+launcher = fullfile(testManagerDirectory, ...
+    'open_standalone_coverage_test_manager.m');
+copy_checked(launcherSource, launcher);
+manifest.TestManagerLauncher = launcher;
+manifest.TestManagerLauncherSHA256 = st_file_signature(launcher).SHA256;
+st_log(cfg, 'INFO', ...
+    ['PACKAGE Test Manager launcher complete | TestFile=%s | ' ...
+     'Launcher=%s'], destination, launcher);
 end
 
-function item = package_target(item, resultObj, targetDirectory, cfg)
+function item = package_target(item, resultObj, targetDirectory, cfg) %#ok<INUSD>
 item = package_execution_inputs(item, targetDirectory, cfg);
 sourceCVF = item.ExecutionCVFPath;
 if ~isfile(sourceCVF)
@@ -153,19 +169,6 @@ finalCVF = fullfile(targetDirectory, ...
 copy_checked(sourceCVF, finalCVF);
 item.PackagedCVF = finalCVF;
 item.PackagedCVFSHA256 = st_file_signature(finalCVF).SHA256;
-
-% cvsave (called while the model was still open, during EXECUTE's
-% evidence capture) already produced the .cvt this promotes below.
-% Every execution model is already closed by the time PACKAGE runs, so
-% re-deriving it here would fail with
-% cvi.ReportUtils.checkModelLoaded:ModelNotOpen. This resolution still
-% verifies the Result actually maps to exactly one Test Case with
-% coverage data, independent of that captured file.
-coverageObjects = st_collect_result_coverage_objects(resultObj);
-if isempty(coverageObjects)
-    error('simtest:StandalonePipelineCoverageMissing', ...
-        'Result contains no coverage objects.');
-end
 
 item = package_captured_report_and_metrics(item, targetDirectory, cfg);
 end
@@ -189,27 +192,32 @@ try
     require_signature(evidencePath, item.PackageEvidenceSHA256, ...
         'simtest:StandalonePipelinePackageEvidenceInvalid');
     evidence = decode_package_evidence(evidencePath, item);
-    reportZip = char(string(evidence.ReportZip));
-    require_signature(reportZip, evidence.ReportZipSHA256, ...
+    reportZip = char(string(evidence.CoverageReportZip));
+    require_signature(reportZip, evidence.CoverageReportZipSHA256, ...
         'simtest:StandalonePipelinePackageReportInvalid');
+    sourceCVT = char(string(evidence.CoverageResult));
+    require_signature(sourceCVT, evidence.CoverageResultSHA256, ...
+        'simtest:StandalonePipelinePackageCoverageInvalid');
+
+    cvtPath = fullfile(targetDirectory, ...
+        [st_export_safe_name(item.CUTName) '_CoverageResult.cvt']);
+    delete_if_present(cvtPath);
+    st_log(cfg, 'INFO', ...
+        'PACKAGE captured coverage data promotion start | CUT=%s', item.CUTName);
+    copy_checked(sourceCVT, cvtPath);
+    item.CoverageResult = cvtPath;
+    item.CoverageResultSHA256 = st_file_signature(cvtPath).SHA256;
+    st_log(cfg, 'INFO', ...
+        'PACKAGE captured coverage data promotion complete | CUT=%s', item.CUTName);
 
     reportDirectory = fullfile(targetDirectory, ...
-        [st_export_safe_name(item.CUTName) '_TestReport']);
+        [st_export_safe_name(item.CUTName) '_CoverageReport']);
     if isfolder(reportDirectory), rmdir(reportDirectory, 's'); end
     mkdir(reportDirectory);
     unzip(reportZip, reportDirectory);
     ensure_report_html(reportDirectory);
     item.TestReport = reportDirectory;
     item.ReportHTML = fullfile(reportDirectory, 'report.html');
-
-    coverageResultSource = char(string(evidence.CoverageResult));
-    require_signature(coverageResultSource, evidence.CoverageResultSHA256, ...
-        'simtest:StandalonePipelinePackageCoverageResultInvalid');
-    cvtPath = fullfile(targetDirectory, ...
-        [st_export_safe_name(item.CUTName) '_CoverageResult.cvt']);
-    copy_checked(coverageResultSource, cvtPath);
-    item.CoverageResult = cvtPath;
-    item.CoverageResultSHA256 = st_file_signature(cvtPath).SHA256;
 
     item = assign_metric(item, evidence.Decision, 'Decision');
     item = assign_metric(item, evidence.Execution, 'Execution');
@@ -238,10 +246,12 @@ catch ME
         'Cannot read package evidence %s: %s', path, ME.message);
 end
 required = {'Version','No','CUTName','TestCaseName','StandaloneModel', ...
-    'ReportZip','ReportZipSHA256','CoverageResult','CoverageResultSHA256', ...
-    'Decision','Execution','MetricSource','MetricSourceStatus'};
+    'CoverageResult','CoverageResultSHA256', ...
+    'CoverageReportZip','CoverageReportZipSHA256', ...
+    'Decision','Execution', ...
+    'MetricSource','MetricSourceStatus'};
 if ~isstruct(evidence) || ~all(isfield(evidence, required)) || ...
-        double(evidence.Version) ~= 1 || ...
+        double(evidence.Version) ~= 2 || ...
         double(evidence.No) ~= double(item.No) || ...
         ~strcmp(char(string(evidence.CUTName)), item.CUTName) || ...
         ~strcmp(char(string(evidence.TestCaseName)), item.TestCaseName) || ...
@@ -355,14 +365,13 @@ item.([name 'PercentageText']) = char(string(metric.PercentageText));
 item.([name 'MetricStatus']) = char(string(metric.Status));
 end
 
-
 function ensure_report_html(reportDirectory)
 rootReport = fullfile(reportDirectory, 'report.html');
 if isfile(rootReport), return; end
 matches = dir(fullfile(reportDirectory, '**', 'report.html'));
 if isempty(matches)
     error('simtest:StandalonePipelineHTMLReportMissing', ...
-        'The official Test Manager ZIP contains no report.html.');
+        'The original Coverage report ZIP contains no report.html.');
 end
 sourceFolder = matches(1).folder;
 entries = dir(sourceFolder);
@@ -382,7 +391,7 @@ for i = 1:numel(entries)
 end
 if ~isfile(rootReport)
     error('simtest:StandalonePipelineHTMLReportMissing', ...
-        'Cannot place report.html at the Test Report root.');
+        'Cannot place report.html at the Coverage Report root.');
 end
 end
 
@@ -438,6 +447,21 @@ end
 
 function value = append_message(existing, added)
 if isempty(existing), value = added; else, value = [existing ' | ' added]; end
+end
+
+function value = package_failure_detail(exception)
+frames = repmat(struct('Name', '', 'File', '', 'Line', 0), 0, 1);
+for i = 1:numel(exception.stack)
+    frame = exception.stack(i);
+    frames(end+1,1) = struct( ...
+        'Name', char(string(frame.name)), ...
+        'File', char(string(frame.file)), ...
+        'Line', double(frame.line)); %#ok<AGROW>
+end
+value = struct( ...
+    'Identifier', char(string(exception.identifier)), ...
+    'Message', char(string(exception.message)), ...
+    'Stack', frames);
 end
 
 function value = action_state(status, message)

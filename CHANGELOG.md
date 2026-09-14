@@ -2,28 +2,26 @@
 
 ## Unreleased
 
-- Fixed standalone Coverage PACKAGE failing with
-  `cvi.ReportUtils.checkModelLoaded:ModelNotOpen` (via `cvsave`) on every
-  target. The captured-evidence report/metric design already avoided
-  reopening a closed model for the HTML report, but PACKAGE still called
-  `cvsave` to produce the `.cvt` after every execution model was already
-  closed. The `.cvt` is now also captured during EXECUTE while its model
-  is open, and PACKAGE only copies and verifies that captured file.
-- Fixed standalone Harness export re-triggering
-  `Simulink:LoadSave:PartAlreadyWritten` on a Harness's ModelWorkspace part.
-  `sltest.harness.export` dirties the copied top model as a side effect;
-  re-saving that unchanged content on a later target's export was rejected
-  by Simulink as a duplicate write, reproducible even right after a full
-  MATLAB restart. The dirtied in-memory state is now discarded by reloading
-  the on-disk copy instead of resaving it.
-- Fixed standalone Coverage reporting after per-CUT model cleanup. Each
-  official Test Manager report and final metric snapshot is now captured while
-  its execution model is still open; PACKAGE verifies and promotes that
-  evidence without reopening a detached Coverage context. PACKAGE also clears
+- Fixed standalone Coverage packaging after per-CUT model cleanup. Each
+  original Coverage `cvhtml` report, CVT, and final metric snapshot is now
+  captured while its execution model is still open; PACKAGE verifies and
+  promotes that evidence without serializing detached Coverage objects. PACKAGE also clears
   a cached prior helper and verifies its active-project implementation contract
   before promotion, preventing mixed revisions in long-lived MATLAB sessions.
+- Generate the original Coverage HTML entirely in a short writable scratch
+  directory before promoting its ZIP. This avoids the Windows legacy path
+  boundary that made long per-CUT names fail with a misleading read-only
+  current-directory error.
+- Package a Test Manager launcher that resolves CUT-specific standalone
+  models and applies each packaged CVF before opening the rewired MLDATX.
+  Evidence capture now rechecks that every active coverage object still holds
+  the CVF used by the original `cvhtml` report.
 - Fixed `st_check_standalone_coverage` returning a 1-by-10 struct array. Its
   ten bit values now remain one field of a scalar summary struct.
+- PACKAGE target manifests now preserve the exception identifier, message, and
+  call stack; checker details surface the first failing source location.
+- Treat a matched CUT with no remaining Coverage objectives as the valid
+  zero-denominator metric (`0/0`, `N/A`) instead of an incomplete package.
 - Replaced the standalone coverage `STEP*` interface with the default
   `ALL` workflow and explicit `EXECUTE`, `PACKAGE`, and `SUMMARY` actions.
   Each copied Test Case now runs once before one Result CVF registration;

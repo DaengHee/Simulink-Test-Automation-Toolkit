@@ -100,19 +100,13 @@ verifyFalse(testCase, contains(package, "'ReadOnly', true"));
 verifyFalse(testCase, contains(package, 'FilteredResults.mldatx'));
 verifyFalse(testCase, contains(package, 'coverage-metrics.mat'));
 verifyFalse(testCase, contains(package, 'cvhtml('));
-% cvsave requires its source model open, and every execution model is
-% already closed by the time PACKAGE runs -- the .cvt must be produced
-% during EXECUTE's evidence capture (while the model is open) instead,
-% and only promoted (copied) here.
 verifyFalse(testCase, contains(package, 'cvsave(arguments{:})'));
-verifyTrue(testCase, contains(package, 'st_collect_result_coverage_objects(resultObj)'));
-verifyTrue(testCase, contains(perCut, 'st_save_coverage_result(coverageResultFile'));
+verifyTrue(testCase, contains(perCut, 'cvsave(arguments{:})'));
+verifyTrue(testCase, contains(perCut, 'cvhtml(reportHTML, coverageObjects{1}'));
 verifyEqual(testCase, numel(regexp(package, ...
     'sltest\.testmanager\.report\(', 'match')), 0);
 verifyEqual(testCase, numel(regexp(perCut, ...
-    'sltest\.testmanager\.report\(', 'match')), 1);
-verifyTrue(testCase, contains(perCut, ...
-    "'IncludeCoverageResult', true"));
+    'sltest\.testmanager\.report\(', 'match')), 0);
 verifyTrue(testCase, contains(package, "source = 'LIVE'"));
 verifyTrue(testCase, contains(package, "source = 'IMPORTED'"));
 verifyTrue(testCase, contains(package, ...
@@ -127,22 +121,25 @@ function testReportAndMetricsAreCapturedBeforeModelCleanup(testCase)
 package = source('pipeline', ...
     'st_package_standalone_coverage_artifacts.m');
 perCut = source('execution', 'st_run_tests_per_cut.m');
+controller = source('pipeline', ...
+    'st_run_standalone_coverage_pipeline.m');
+checker = source('verification', 'st_check_standalone_coverage.m');
+launcher = string(fileread(fullfile(st_project_root(), 'resources', ...
+    'standalone_coverage', 'open_standalone_coverage_test_manager.m')));
 captureAt = strfind(perCut, 'capture_package_evidence(');
-reportAt = strfind(perCut, 'sltest.testmanager.report(resultObj');
-coverageResultAt = strfind(perCut, ...
-    'st_save_coverage_result(coverageResultFile');
+reportAt = strfind(perCut, 'cvhtml(reportHTML, coverageObjects{1}');
 metricAt = strfind(perCut, ...
     'st_collect_final_cut_coverage_metrics(');
 cleanupAt = strfind(perCut, 'close_execution_model(row, cfg)');
 verifyNotEmpty(testCase, captureAt);
 verifyNotEmpty(testCase, reportAt);
-verifyNotEmpty(testCase, coverageResultAt);
 verifyNotEmpty(testCase, metricAt);
 verifyNotEmpty(testCase, cleanupAt);
 verifyLessThan(testCase, captureAt(1), cleanupAt(1));
-verifyLessThan(testCase, reportAt(1), coverageResultAt(1));
-verifyLessThan(testCase, coverageResultAt(1), metricAt(1));
-verifyLessThan(testCase, metricAt(1), cleanupAt(1));
+verifyLessThan(testCase, reportAt(1), metricAt(1));
+coverageSaveAt = strfind(perCut, 'save_package_evidence_cvt(cvtPath');
+verifyNotEmpty(testCase, coverageSaveAt);
+verifyLessThan(testCase, coverageSaveAt(1), cleanupAt(1));
 verifyTrue(testCase, contains(perCut, ...
     'StandalonePackageEvidenceModelNotOpen'));
 verifyTrue(testCase, contains(perCut, ...
@@ -158,11 +155,69 @@ verifyTrue(testCase, contains(perCut, ...
 verifyTrue(testCase, contains(package, ...
     'package_captured_report_and_metrics'));
 verifyTrue(testCase, contains(package, ...
-    'require_signature(reportZip, evidence.ReportZipSHA256'));
+    'require_signature(reportZip, evidence.CoverageReportZipSHA256'));
 verifyTrue(testCase, contains(package, ...
-    'require_signature(coverageResultSource, evidence.CoverageResultSHA256'));
+    'require_signature(sourceCVT, evidence.CoverageResultSHA256'));
+verifyTrue(testCase, contains(package, ...
+    'PACKAGE captured coverage data promotion complete'));
+verifyTrue(testCase, contains(perCut, ...
+    "'CoverageReportZipSHA256', st_file_signature(reportZip).SHA256"));
+verifyTrue(testCase, contains(perCut, ...
+    "scratchDirectory = pwd"));
+verifyTrue(testCase, contains(perCut, ...
+    "reportDirectory = fullfile(scratchDirectory, 'CoverageReport')"));
+verifyTrue(testCase, contains(perCut, ...
+    "scratchZip = fullfile(scratchDirectory, 'CoverageReport.zip')"));
+verifyTrue(testCase, contains(perCut, ...
+    "copyfile(scratchZip, reportZip, 'f')"));
+verifyFalse(testCase, contains(perCut, ...
+    "fullfile(evidenceDirectory, 'CoverageReport')"));
+scratchAt = strfind(perCut, "scratchDirectory = pwd");
+reportPathAt = strfind(perCut, ...
+    "reportHTML = fullfile(reportDirectory, 'report.html')");
+cvhtmlAt = strfind(perCut, ...
+    "cvhtml(reportHTML, coverageObjects{1}, '-sRT=0')");
+promoteAt = strfind(perCut, "copyfile(scratchZip, reportZip, 'f')");
+verifyLessThan(testCase, scratchAt(1), reportPathAt(1));
+verifyLessThan(testCase, reportPathAt(1), cvhtmlAt(1));
+verifyLessThan(testCase, cvhtmlAt(1), promoteAt(1));
+verifyTrue(testCase, contains(perCut, ...
+    "'Version', 2"));
+verifyTrue(testCase, contains(perCut, ...
+    'Standalone original Coverage report capture complete'));
+verifyTrue(testCase, contains(perCut, ...
+    'apply_package_report_filter(coverageObjects, row, coverageFilterPath, cfg)'));
+verifyTrue(testCase, contains(perCut, ...
+    'StandalonePackageEvidenceCoverageFilterApplyFailed'));
+verifyTrue(testCase, contains(perCut, ...
+    'Standalone original Coverage report CVF binding readback complete'));
+verifyTrue(testCase, contains(perCut, ...
+    "'CoverageObjects', coverageObjects"));
+metrics = source('reporting', 'st_collect_final_cut_coverage_metrics.m');
+summary = source('reporting', 'st_collect_coverage_summary.m');
+verifyTrue(testCase, contains(metrics, "'CoverageObjects', p.Results.CoverageObjects"));
+verifyTrue(testCase, contains(summary, 'resultCoverage = p.Results.CoverageObjects'));
 verifyTrue(testCase, contains(package, ...
     'assign_metric(item, evidence.Decision'));
+verifyTrue(testCase, contains(package, ...
+    'item.PackageFailure = package_failure_detail(ME)'));
+verifyTrue(testCase, contains(package, ...
+    "'Stack', frames"));
+verifyTrue(testCase, contains(controller, ...
+    "'PackageFailure', empty_package_failure()"));
+verifyTrue(testCase, contains(controller, "'TestManagerLauncher', ''"));
+verifyTrue(testCase, contains(package, ...
+    "'open_standalone_coverage_test_manager.m'"));
+verifyTrue(testCase, contains(package, ...
+    'PACKAGE Test Manager launcher complete'));
+verifyTrue(testCase, contains(launcher, ...
+    'sltest.testmanager.load(testFilePath)'));
+verifyTrue(testCase, contains(launcher, ...
+    'load_system(modelFile)'));
+verifyTrue(testCase, contains(launcher, ...
+    'coverage.CoverageFilterFilename = filterFile'));
+verifyTrue(testCase, contains(launcher, 'sltest.testmanager.view'));
+verifyTrue(testCase, contains(checker, 'TestManagerLauncherSHA256'));
 rewireAt = strfind(package, 'function item = rewire_packaged_input');
 rewireIsolationAt = strfind(package, ...
     "if bdIsLoaded(modelName)");
@@ -171,6 +226,22 @@ rewireCleanupAt = strfind(package, ...
 rewireIsolationAt = rewireIsolationAt( ...
     rewireIsolationAt > rewireAt(1));
 verifyLessThan(testCase, rewireIsolationAt(1), rewireCleanupAt(1));
+end
+
+function testCoverageWithoutObjectivesUsesValidZeroDenominatorMetric(testCase)
+metrics = source('reporting', 'st_collect_final_cut_coverage_metrics.m');
+summary = source('reporting', 'st_collect_coverage_summary.m');
+prepare = source('execution', 'st_prepare_standalone_bundle_execution.m');
+verifyTrue(testCase, contains(summary, 'if isempty(values)'));
+verifyTrue(testCase, contains(summary, ...
+    'st_coverage_percentage(0, 0)'));
+verifyTrue(testCase, contains(summary, ...
+    'coverage has no objectives for this CUT'));
+verifyFalse(testCase, contains(metrics, 'zero_decision_metric'));
+verifyTrue(testCase, contains(prepare, ...
+    'StandaloneCoverageMetricSettingsReadbackFailed'));
+verifyTrue(testCase, contains(prepare, "contains(metricSettings, 'd')"));
+verifyFalse(testCase, contains(prepare, "contains(metricSettings, 'e')"));
 end
 
 function testSummaryUsesExactSevenColumns(testCase)

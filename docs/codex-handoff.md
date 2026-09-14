@@ -348,15 +348,53 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   한 번 import한다.
 - pipeline manifest와 SHA-256은 원자적으로 갱신되며 latest.json으로 재개한다.
   `PACKAGE`는 공유 Test Manager 사본, CUT별 standalone 모델·input·CVF·CVT와
-  공식 ZIP root report.html을 만들고 `SUMMARY`는 정확한 7열
-  CoverageSummary.xlsx를 원자적으로 교체한다. PDF, 별도 cvhtml,
-  TestSummary.xlsx와 coverage-metrics.mat는 만들지 않는다.
+  Test Manager Coverage Results의 REPORT 화살표가 여는 원본 `cvhtml` root
+  report.html을 만들고 `SUMMARY`는 정확한 7열 CoverageSummary.xlsx를 원자적으로
+  교체한다. PDF, TestSummary.xlsx와 coverage-metrics.mat는 만들지 않는다.
 - bundle 실행 후 copied Test File과 copied Top Model을 닫고 caller의 MATLAB path와
   현재 폴더를 복원한다. 이 상태와 외부 Harness/Input 파일 checksum도 manifest와
   one-screen checker에서 확인한다.
 - 현재 PC에는 MATLAB과 MISS_HIT 실행 환경이 없어 `git diff --check`와 정적 계약
   검사만 수행할 수 있다. `tests/integration/test_standalone_coverage_pipeline_runtime.m`
   및 위 20번 R2025b/GUI 증거 전에는 main에 통합하지 않는다.
+- PACKAGE의 남은 `cvsave`는 닫힌 execution model을 참조하는 Coverage 객체를
+  직렬화하므로, 실행 model이 열린 `capture_package_evidence`로 이동했다. PACKAGE는
+  CVT/HTML/metric evidence의 SHA-256을 검증해 복사만 한다. R2025b에서는 ALL 및
+  EXECUTE→PACKAGE→SUMMARY 모두 `Package=OK`, CUT별 `report.html`/`.cvt` 생성과
+  `st_check_standalone_coverage = 1111111111`을 확인해야 한다. PACKAGE 예외는
+  `PackageFailure.Stack`에 최초 호출 파일·라인을 보존한다. 실행 명령은
+  `docs/manual/standalone-coverage-runtime.md`에 있다.
+- R2025b Test Manager CoverageSettings readback의 `MetricSettings='d'`는 Decision이
+  Block Execution을 포함하는 legacy 표기이므로 정상이다. 이 값에 `e`가 없다는 이유로
+  EXECUTE를 중단하면 안 된다. matched CUT에서 CVF가 모든 objective를 제외하면
+  Decision/Execution 모두 `0/0`, `N/A` (`Percentage=NaN`)와 `MetricStatus=OK`가
+  정상이며, unmatched coverage object와 혼동하지 않도록 summary 수집 단계에서만
+  zero-denominator row를 만든다.
+- `e8346c6` 이후 실제 `ALL`에서 1·4번 CUT은 EXECUTE/PACKAGE가 통과했지만 2·3번
+  CUT의 package evidence 캡처가 `The current directory is read only`로 실패했다.
+  PACKAGE의 `st_package_standalone_coverage_artifacts:37`은 이미 실패한 EXECUTE
+  lifecycle을 전달한 위치다. CVSAVE와 CVHTML은 모두 writable scratch 격리가 적용된
+  상태이므로, 실패 CUT의 남은 CVT/report/ZIP/evidence 파일과 ExecutionLog event로
+  실제 실패 API를 먼저 구분해야 한다. 진단 명령은
+  `docs/manual/standalone-coverage-runtime.md` 3절에 있다.
+- 진단 결과 실패 CUT 모두 `CoverageResult.cvt`는 있고 Coverage report/ZIP은 없어
+  `cvhtml` 실패로 확정됐다. 실패한 두 report.html 절대 경로는 262자, 통과 target은
+  235·257·259자로 Windows legacy 260자 경계와 일치했다. 기존 격리는 MATLAB `pwd`만
+  짧게 바꾸고 `cvhtml`에는 긴 절대 출력 경로를 전달한 것이 결함이었다. 이제 report
+  tree와 ZIP을 writable scratch 내부에서 완성하고, 260자 미만인 단일 ZIP만 evidence
+  경로로 복사한다. R2025b 새 `ALL` 재검증이 필요하다.
+- 실제 새 `ALL`은 끝까지 성공했지만 packaged MLDATX를 Test Manager UI에서 직접
+  열면 `..._Harness1` standalone model을 찾지 못했다. MLDATX의 Model SUT는 Harness가
+  아니라 CUT별 package folder의 standalone `.slx`이고, 직접 load는 그 folder들을
+  MATLAB path에 추가하지 않는다. PACKAGE는 launcher를 TestManager folder에 함께
+  제공해 model path/load와 packaged CVF Test Case readback 후 GUI를 열도록 보강했다.
+  실행 때 Result coverage object에 CVF를 사후 연결하는 방식은 공식 `cvdata.filter`
+  API의 지원 범위다. 다만 R2025b 실제 실행에서 Result hierarchy를 다시 조회하면
+  새 `cvdata` 객체가 materialize되어 앞서 등록한 filter readback이 비어 보였다.
+  이전 객체가 비었다는 이유만으로 EXECUTE를 실패시키는 검증은 제거했다. capture는
+  CVSAVE/CVHTML/metric에 실제로 넘길 새 객체에 CVF를 다시 bind하고 그 즉시 readback한
+  뒤 진행한다. 새 `ALL`에서 `Standalone original Coverage report CVF binding complete`
+  로그와 CVF의 Excluded/Justified HTML 표시를 확인해야 한다.
 - 실제 R2025b에서 사용자가 Top Model을 열지 않았는데도 target 입력 수집 후
   `StandaloneModelStillLoadedBeforeRun`이 발생했다. export 중간 상태가 아니라
   `st_export_test_bundle` 진입 전 load 상태를 기준으로 dependency/Harness API가
@@ -430,7 +468,9 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   `0111100111`로 B1/B6/B7만 실패했으며, 진단 중 `Bits` cell이 struct constructor에서
   펼쳐져 summary가 1x10 struct가 되는 오류를 확인했다. `Bits`를 cell wrapper로
   감싸 scalar summary를 복구했다. 남은 B1/B6/B7의 세부 원인은 추가 runtime 출력이
-  필요하다.
+  필요하다. 기존 PACKAGE catch가 identifier/message만 보존하고 stack을 버려
+  `cvhtml:ModelNotOpen`의 실제 호출 지점을 잃는 진단 결함도 확인했다. 이제 target
+  manifest에 exception stack을 직렬화하고 checker details에 첫 frame을 표시한다.
 
 정적 검증: 변경·추가 MATLAB 파일 중 37개가 MISS_HIT UTF-8 검사에 통과했다.
 Signal Editor의 `import(reader)` 파서 오류는 Import 이전 기준 `7f0825e`에서도

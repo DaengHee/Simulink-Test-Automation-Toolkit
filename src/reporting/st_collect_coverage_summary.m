@@ -7,6 +7,7 @@ addParameter(p, 'IncludeTestDetails', true, ...
     @(x) islogical(x) && isscalar(x));
 addParameter(p, 'MatchCoverageObjects', false, ...
     @(x) islogical(x) && isscalar(x));
+addParameter(p, 'CoverageObjects', {}, @(x) iscell(x));
 addParameter(p, 'ProgressFcn', [], ...
     @(x) isempty(x) || isa(x, 'function_handle'));
 parse(p, varargin{:});
@@ -15,7 +16,12 @@ matchCoverageObjects = p.Results.MatchCoverageObjects;
 progressFcn = p.Results.ProgressFcn;
 
 coverage = empty_coverage_table();
-resultCoverage = st_collect_result_coverage_objects(resultObj);
+resultCoverage = p.Results.CoverageObjects;
+if isempty(resultCoverage)
+    resultCoverage = st_collect_result_coverage_objects(resultObj);
+else
+    resultCoverage = resultCoverage(:);
+end
 resultDescriptors = describe_coverage_objects(resultCoverage);
 
 % Overall CUT rows come from the aggregated ResultSet coverage so repeated
@@ -199,6 +205,15 @@ catch ME
     return;
 end
 if isempty(values)
+    [percentage, percentageText] = st_coverage_percentage(0, 0);
+    row = empty_coverage_table();
+    row(1,:) = {string(runLabel), string(level), double(target.No), ...
+        string(target.CUTName), string(testCaseName), ...
+        string(iterationName), string(objectPath), string(sourceRoot), ...
+        string(checksum), string(metric), 0, 0, 0, percentage, ...
+        percentageText, "OK", ...
+        string(metric) + " coverage has no objectives for this CUT"};
+    coverage = [coverage; row]; %#ok<AGROW>
     return;
 end
 

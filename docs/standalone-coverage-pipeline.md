@@ -37,7 +37,7 @@ st_run_standalone_coverage_pipeline( ...
 
 | Action | 역할 |
 |---|---|
-| `EXECUTE` | standalone export, Test Case 1회 실행, CVF 1회 등록, 열린 모델에서 report/metric 임시 증거 캡처 |
+| `EXECUTE` | standalone export, Test Case 1회 실행, CVF 1회 등록, 열린 모델에서 report/metric/CVT 임시 증거 캡처 |
 | `PACKAGE` | 임시 증거를 검증해 Model/Input/CVF/CVT/HTML/Test File 패키징 |
 | `SUMMARY` | manifest scalar에서 `CoverageSummary.xlsx` 생성 |
 | `ALL` | 세 Action 연속 실행, 기본값 |
@@ -61,7 +61,7 @@ PACKAGE로 전달하므로 export/import를 수행하지 않는다. `PACKAGE`와
 - Signal Editor Input MAT(대상에 Input이 있을 때)
 - CVF
 - CVT
-- Test Manager HTML report와 root `report.html`
+- Test Manager Coverage Results의 REPORT 화살표가 여는 원본 Coverage HTML과 root `report.html`
 - target manifest
 
 파이프라인 root에는 copied Test File, pipeline manifest, JSONL lifecycle event log,
@@ -69,7 +69,8 @@ PACKAGE로 전달하므로 export/import를 수행하지 않는다. `PACKAGE`와
 추가된다.
 
 `FilteredResults.mldatx`, `coverage-metrics.mat`, `TestSummary.xlsx`, PDF와 별도
-`cvhtml` coverage 파일은 standalone 산출물로 만들지 않는다.
+보조 Coverage HTML은 만들지 않는다. `report.html`은 CUT별 원본 `cvhtml` Coverage
+보고서 하나만 보존한다.
 
 ## CoverageSummary.xlsx
 
@@ -88,7 +89,18 @@ Execution (%)
 Decision/Execution 분모가 0이거나 값이 없으면 `N/A`이다. metric source는 Result
 coverage API와 standalone CUT path의 단일 일치를 요구한다. 둘 이상의 후보가
 일치하면 `AMBIGUOUS`로 실패한다. 실제 R2025b HTML Details와 대조하기 전 source
-상태는 `PROVISIONAL`이다.
+상태는 `PROVISIONAL`이다. CVF로 모든 objective가 제외됐거나 objective가 없는
+CUT은 `decisioninfo`/`executioninfo`의 빈 결과를 유효한 `0/0`, `N/A` metric으로
+기록한다.
+
+원본 Coverage HTML은 긴 execution target 경로에 직접 생성하지 않는다. Windows의
+legacy path 경계를 피하도록 짧은 writable scratch에서 report tree와 ZIP을 완성한 뒤
+ZIP만 package evidence 경로로 승격한다.
+
+패키지의 `TestManager` 폴더에는 rewired MLDATX와
+`open_standalone_coverage_test_manager.m` launcher가 함께 생성된다. standalone model은
+CUT별 target 폴더에 보존되므로 MLDATX를 직접 열지 않고 launcher로 model path/load와
+packaged CVF의 Test Case readback을 준비한 뒤 Test Manager를 열어야 한다.
 
 ## 한 화면 검사 비트
 
@@ -114,3 +126,7 @@ Test Manager clear 또는 파일 생성을 수행하지 않는다.
 정적 테스트만으로 runtime 완료를 주장하지 않는다. 실제 MATLAB R2025b에서
 `tests/integration/test_standalone_coverage_pipeline_runtime.m`과 multi-CUT acceptance를
 실행하고, 최종 checker 결과 `1111111111 PASS`를 확보해야 완료로 본다.
+
+실제 수동 실행과 실패 호출 위치 확인 명령은
+[`manual/standalone-coverage-runtime.md`](manual/standalone-coverage-runtime.md)에
+정리한다.
