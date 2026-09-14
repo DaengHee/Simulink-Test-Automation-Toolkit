@@ -10,7 +10,9 @@
 - Fixed standalone Coverage reporting after per-CUT model cleanup. Each
   official Test Manager report and final metric snapshot is now captured while
   its execution model is still open; PACKAGE verifies and promotes that
-  evidence without reopening a detached Coverage context.
+  evidence without reopening a detached Coverage context. PACKAGE also clears
+  a cached prior helper and verifies its active-project implementation contract
+  before promotion, preventing mixed revisions in long-lived MATLAB sessions.
 - Replaced the standalone coverage `STEP*` interface with the default
   `ALL` workflow and explicit `EXECUTE`, `PACKAGE`, and `SUMMARY` actions.
   Each copied Test Case now runs once before one Result CVF registration;
