@@ -16,11 +16,23 @@ st_run_from_harness('PreparationMode','FORCE','ExecutionMode','PER_CUT','Execute
 info = st_run_standalone_coverage_pipeline('Action','ALL')
 ```
 
-## 3단계 - 결과 검증
+## 3단계 - 전체 요약 확인
 
 ```matlab
 [code, summary] = st_check_standalone_coverage('PipelineId', info.PipelineId)
 disp(code)
 ```
 
-`code`가 `1111111111`이면 34개 전부 정상입니다.
+`code`가 `1111111111`이면 전부 정상.
+
+## 4단계 - CUT별 상세 결과 확인 (선택, 문제 있을 때 유용)
+
+`info`를 그대로 쓰시면 됩니다 (`m` 대신 `info`로만 바꾸면 아까 보여주신 코드와 동일):
+
+```matlab
+for i = 1:numel(info.Targets)
+    fprintf('\n[%03d] %s | Package=%s\n%s\n', ...
+        info.Targets(i).No, info.Targets(i).CUTName, ...
+        info.Targets(i).PackageStatus, info.Targets(i).Message);
+end
+```
