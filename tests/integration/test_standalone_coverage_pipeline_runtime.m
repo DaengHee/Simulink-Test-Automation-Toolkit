@@ -54,35 +54,67 @@ end
 end
 
 function testPrepareRunResumeAndSourceIntegrity(testCase)
-st_run_standalone_coverage_pipeline( ...
-    'RunMode', 'STEP1', 'PreparationMode', 'FORCE');
+st_run_from_harness( ...
+    'PreparationMode', 'FORCE', 'ExecutionMode', 'PER_CUT', ...
+    'ExecuteTests', false);
 cfg = st_config();
 beforeModel = st_file_signature(cfg.ModelFile);
 beforeTest = st_file_signature(cfg.TestFile);
 beforeExcel = st_file_signature(cfg.ManagementExcel);
 
+% Establish the reported production precondition explicitly: the user did
+% not open the source model. EXECUTE must keep this state even if dependency
+% analysis or Harness APIs load the model internally.
+if bdIsLoaded(cfg.TopModel)
+    close_system(cfg.TopModel, 0);
+end
+verifyFalse(testCase, bdIsLoaded(cfg.TopModel));
+validatedCfg = st_require_runtime_target('LoadModel', false);
+verifyEqual(testCase, validatedCfg.TopModel, cfg.TopModel);
+verifyFalse(testCase, bdIsLoaded(cfg.TopModel));
+
 runInfo = st_run_standalone_coverage_pipeline( ...
-    'RunMode', 'STEP234', ...
+    'Action', 'EXECUTE', ...
     'ContinueOnFailure', true, ...
-    'FailOnNonPass', false, ...
-    'ReportMode', 'SUMMARY');
+    'FailOnNonPass', false);
 verifyTrue(testCase, isfile(runInfo.Manifest));
 verifyEqual(testCase, string(runInfo.Targets(1).ResultFilterStatus), "OK");
+verifyEqual(testCase, runInfo.Targets(1).RunCount, 1);
+verifyEqual(testCase, runInfo.Targets(1).ResultFilterAttachCount, 1);
+verifyTrue(testCase, runInfo.SaveTestResult);
+verifyTrue(testCase, isfile(runInfo.ResultFile));
 
 packageInfo = st_run_standalone_coverage_pipeline( ...
-    'RunMode', 'STEP5', 'PipelineId', runInfo.PipelineId, ...
-    'ReportMode', 'FULL');
+    'Action', 'PACKAGE', 'PipelineId', runInfo.PipelineId);
+[packageManifest, ~] = st_load_standalone_pipeline_manifest( ...
+    cfg.StandaloneCoverageRootDir, runInfo.PipelineId);
+verifyEqual(testCase, packageManifest.ResultImportCount, 1);
+verifyEqual(testCase, packageManifest.PackageResultSource, 'IMPORTED');
 finalInfo = st_run_standalone_coverage_pipeline( ...
-    'RunMode', 'STEP6', 'PipelineId', runInfo.PipelineId);
+    'Action', 'SUMMARY', 'PipelineId', runInfo.PipelineId);
 verifyTrue(testCase, isfile(packageInfo.TestManagerFile));
 verifyTrue(testCase, isfile(finalInfo.CoverageSummary));
 target = finalInfo.Targets(1);
-verifyTrue(testCase, isfile(target.CVFPath));
+verifyEqual(testCase, target.HarnessName, target.StandaloneModel);
+[~, modelStem] = fileparts(target.PackagedStandaloneModel);
+verifyEqual(testCase, target.HarnessName, modelStem);
+verifyTrue(testCase, isfile(target.PackagedCVF));
 verifyTrue(testCase, isfile(target.CoverageResult));
-verifyTrue(testCase, isfile(fullfile(target.TestReport, 'report.html')));
-verifyTrue(testCase, isfolder(fullfile(target.TestReport, 'coverage')));
+verifyTrue(testCase, isfile(target.ReportHTML));
+verifyFalse(testCase, isfile(fullfile(target.OutputDirectory, ...
+    'TestSummary.xlsx')));
 verifyTrue(testCase, isfolder(fullfile( ...
     fileparts(finalInfo.Manifest), '.work')));
+resultCountBeforeCheck = numel(sltest.testmanager.getResultSets);
+fileStateBeforeCheck = file_state(fileparts(finalInfo.Manifest));
+[code, checkSummary] = st_check_standalone_coverage( ...
+    'PipelineId', finalInfo.PipelineId);
+fileStateAfterCheck = file_state(fileparts(finalInfo.Manifest));
+verifyEqual(testCase, code, '1111111111');
+verifyEqual(testCase, checkSummary.Status, 'PASS');
+verifyEqual(testCase, numel(sltest.testmanager.getResultSets), ...
+    resultCountBeforeCheck);
+verifyEqual(testCase, fileStateAfterCheck, fileStateBeforeCheck);
 
 afterModel = st_file_signature(cfg.ModelFile);
 afterTest = st_file_signature(cfg.TestFile);
@@ -90,14 +122,68 @@ afterExcel = st_file_signature(cfg.ManagementExcel);
 verifyEqual(testCase, afterModel.SHA256, beforeModel.SHA256);
 verifyEqual(testCase, afterTest.SHA256, beforeTest.SHA256);
 verifyEqual(testCase, afterExcel.SHA256, beforeExcel.SHA256);
+for i = 1:numel(packageManifest.SourceAfter.Inputs)
+    input = packageManifest.SourceAfter.Inputs(i);
+    verifyEqual(testCase, st_file_signature(input.Path).SHA256, ...
+        input.SHA256);
+end
 
 % STANDALONE_HARNESS export reloads the source model as a side effect of
 % collecting each target's Signal Editor/SLDV input (sltest.harness.load
 % loads its owner if not already loaded). If that model is left loaded
-% afterward, a later STEP234 run's bundle runner refuses to start because
+% afterward, a later EXECUTE run's bundle runner refuses to start because
 % a model with the same name is already loaded outside the bundle
 % (simtest:BundleModelAlreadyLoaded).
 verifyFalse(testCase, bdIsLoaded(testCase.TestData.TopModel));
+end
+
+function testAllUsesLiveResultsWithoutResultRoundTrip(testCase)
+st_run_from_harness( ...
+    'PreparationMode', 'FORCE', 'ExecutionMode', 'PER_CUT', ...
+    'ExecuteTests', false);
+cfg = st_config();
+if bdIsLoaded(cfg.TopModel)
+    close_system(cfg.TopModel, 0);
+end
+
+info = st_run_standalone_coverage_pipeline( ...
+    'Action', 'ALL', 'ContinueOnFailure', true, ...
+    'FailOnNonPass', false);
+[manifest, ~] = st_load_standalone_pipeline_manifest( ...
+    cfg.StandaloneCoverageRootDir, info.PipelineId);
+verifyFalse(testCase, manifest.SaveTestResult);
+verifyEqual(testCase, manifest.ResultExportCount, 0);
+verifyEqual(testCase, manifest.ResultImportCount, 0);
+verifyEqual(testCase, manifest.PackageResultSource, 'LIVE');
+verifyEmpty(testCase, manifest.ResultFile);
+verifyFalse(testCase, manifest.CanResumePackage);
+verifyTrue(testCase, isfile(manifest.CoverageSummary));
+
+resultCountBeforeCheck = numel(sltest.testmanager.getResultSets);
+fileStateBeforeCheck = file_state(fileparts(info.Manifest));
+[code, checkSummary] = st_check_standalone_coverage( ...
+    'PipelineId', info.PipelineId);
+verifyEqual(testCase, code, '1111111111');
+verifyEqual(testCase, checkSummary.Status, 'PASS');
+verifyEqual(testCase, numel(sltest.testmanager.getResultSets), ...
+    resultCountBeforeCheck);
+verifyEqual(testCase, file_state(fileparts(info.Manifest)), ...
+    fileStateBeforeCheck);
+verifyFalse(testCase, bdIsLoaded(cfg.TopModel));
+end
+
+function state = file_state(root)
+items = dir(fullfile(root, '**', '*'));
+items = items(~[items.isdir]);
+Path = strings(numel(items),1);
+Bytes = zeros(numel(items),1);
+Modified = zeros(numel(items),1);
+for i = 1:numel(items)
+    Path(i) = string(fullfile(items(i).folder, items(i).name));
+    Bytes(i) = items(i).bytes;
+    Modified(i) = items(i).datenum;
+end
+state = sortrows(table(Path, Bytes, Modified), 'Path');
 end
 
 function testStandaloneExportRestoresSessionWhenATargetFails(testCase)

@@ -1,4 +1,4 @@
-function info = run_exported_tests(varargin)
+function [info, runtimeContext] = run_exported_tests(varargin)
 %RUN_EXPORTED_TESTS Run this exported test bundle in a fresh workspace.
 %
 %   RUN_EXPORTED_TESTS validates the bundle, copies template/ into a new
@@ -20,7 +20,18 @@ addParameter(p, 'ReportMode', 'SUMMARY', ...
 addParameter(p, 'ResultFilterMode', 'DURING_RUN', ...
     @(x) ismember(upper(string(x)), ...
     ["DURING_RUN","POST_RUN_REQUIRED"]));
+addParameter(p, 'SaveTestResult', false, ...
+    @(x) islogical(x) && isscalar(x));
+addParameter(p, 'ResultFile', '', ...
+    @(x) ischar(x) || isstring(x));
 parse(p, varargin{:});
+runtimeContext = struct('Results', [], 'TestFile', [], 'Targets', table(), ...
+    'RunnerEnvironmentCleanupStatus', 'NOT_RUN');
+sessionCleanupInfo = struct( ...
+    'TestFileStatus', 'NOT_REQUIRED', ...
+    'TopModelStatus', 'NOT_REQUIRED');
+standaloneSessionCleanup = [];
+standaloneCleanupState = [];
 
 bundleRoot = fileparts(mfilename('fullpath'));
 manifestPath = fullfile(bundleRoot, 'manifest.json');
@@ -61,7 +72,9 @@ ModelFile = modelFile; %#ok<NASGU>
 save(fullfile(workRoot, 'runtime_target.mat'), 'TopModel', 'ModelFile');
 
 previousDirectory = pwd;
-pathCleanup = onCleanup(@() restore_environment(previousDirectory, workRoot)); %#ok<NASGU>
+previousPath = path;
+pathCleanup = onCleanup(@() restore_environment( ...
+    previousDirectory, previousPath)); %#ok<NASGU>
 cd(workRoot);
 addpath(workRoot, '-begin');
 clear st_setup st_config st_project_root
@@ -73,6 +86,7 @@ end
 
 rewrite_sldv_manifest(bundleRoot, workRoot, manifest);
 cfg = st_require_runtime_target();
+testFilePath = cfg.TestFile;
 st_log(cfg, 'INFO', ...
     'Exported bundle execution start | Bundle=%s | ModelMode=%s', ...
     char(manifest.BundleId), executionModelMode);
@@ -81,13 +95,31 @@ if strcmp(executionModelMode, 'STANDALONE_HARNESS')
     [executionTargets, testCases, preparation, tf] = ...
         st_prepare_standalone_bundle_execution( ...
         manifest, bundleRoot, workRoot);
-    [~, updates, reportInfo] = st_run_tests_per_cut( ...
+    standaloneCleanupState = containers.Map();
+    standaloneCleanupState('Enabled') = true;
+    standaloneSessionCleanup = onCleanup(@() ...
+        cleanup_standalone_execution_session_quiet( ...
+        tf, cfg, workRoot, standaloneCleanupState));
+    [results, updates, reportInfo] = st_run_tests_per_cut( ...
         'TargetConfig', executionTargets, ...
         'TestFile', tf, 'TestCases', testCases, ...
         'ContinueOnFailure', p.Results.ContinueOnFailure, ...
         'FailOnNonPass', p.Results.FailOnNonPass, ...
         'ReportMode', p.Results.ReportMode, ...
-        'ResultFilterMode', p.Results.ResultFilterMode);
+        'ResultFilterMode', p.Results.ResultFilterMode, ...
+        'GenerateResultArtifacts', false, ...
+        'WriteRunSummaryExcel', false, ...
+        'SaveTestResult', p.Results.SaveTestResult, ...
+        'ResultFile', p.Results.ResultFile, ...
+        'RunRootDirectory', fullfile(executionRoot, 'r'));
+    runtimeContext.Results = results;
+    runtimeContext.TestFile = tf;
+    runtimeContext.Targets = executionTargets;
+    sessionCleanupInfo = cleanup_standalone_execution_session( ...
+        tf, cfg, workRoot);
+    runtimeContext.TestFile = [];
+    standaloneCleanupState('Enabled') = false;
+    clear standaloneSessionCleanup;
 else
     rewrite_signal_editor_paths(bundleRoot, workRoot, manifest, modelFile);
     [~, updates, runContext] = st_run_generated_tests();
@@ -110,14 +142,22 @@ st_log(cfg, 'INFO', ...
     'Exported bundle execution complete | Bundle=%s | ModelMode=%s', ...
     char(manifest.BundleId), executionModelMode);
 
+resultFile = '';
+if isfield(reportInfo, 'ResultFile')
+    resultFile = char(string(reportInfo.ResultFile));
+end
 info = struct( ...
     'ExecutionId', executionId, ...
     'ExecutionDirectory', executionRoot, ...
     'Workspace', workRoot, ...
     'ExecutionModelMode', executionModelMode, ...
+    'TestFile', testFilePath, ...
     'Preparation', table2struct(preparation), ...
     'ExpectedUpdates', table2struct(updates), ...
     'ResultFilterMode', upper(char(string(p.Results.ResultFilterMode))), ...
+    'SaveTestResult', logical(p.Results.SaveTestResult), ...
+    'ResultFile', resultFile, ...
+    'SessionCleanup', sessionCleanupInfo, ...
     'Report', reportInfo, ...
     'ReferenceRunId', char(manifest.ReferenceRunId), ...
     'CompletedAt', timestamp_text());
@@ -132,6 +172,72 @@ if isfield(manifest, 'ReferenceReport') && ...
         fullfile(bundleRoot, char(manifest.ReferenceReport)));
 else
     fprintf('Reference : NONE (verification snapshot)\n');
+end
+end
+
+function info = cleanup_standalone_execution_session(tf, cfg, workRoot)
+info = struct('TestFileStatus', 'NOT_RUN', 'TopModelStatus', 'NOT_RUN');
+st_log(cfg, 'INFO', 'Standalone copied session cleanup start');
+try
+    close(tf);
+    info.TestFileStatus = 'OK';
+catch ME
+    st_log(cfg, 'ERROR', ...
+        'Standalone copied Test File close failed | %s: %s', ...
+        ME.identifier, ME.message);
+    error('simtest:StandaloneCopiedTestFileCleanupFailed', ...
+        'Cannot close the copied Test File: %s', ME.message);
+end
+
+try
+    if bdIsLoaded(cfg.TopModel)
+        loadedFile = char(get_param(cfg.TopModel, 'FileName'));
+        if ~is_under_root(loadedFile, workRoot)
+            error('simtest:StandaloneCopiedModelIsolationFailed', ...
+                'Loaded Top Model is outside the copied workspace: %s', ...
+                loadedFile);
+        end
+        close_system(cfg.TopModel, 0);
+    end
+    if bdIsLoaded(cfg.TopModel)
+        error('simtest:StandaloneCopiedModelCleanupFailed', ...
+            'Copied Top Model remains loaded: %s', cfg.TopModel);
+    end
+    info.TopModelStatus = 'OK';
+catch ME
+    st_log(cfg, 'ERROR', ...
+        'Standalone copied Top Model close failed | %s: %s', ...
+        ME.identifier, ME.message);
+    rethrow(ME);
+end
+st_log(cfg, 'INFO', 'Standalone copied session cleanup complete');
+end
+
+function cleanup_standalone_execution_session_quiet( ...
+        tf, cfg, workRoot, state)
+if ~state('Enabled'), return; end
+try
+    openFiles = sltest.testmanager.getTestFiles;
+    for i = 1:numel(openFiles)
+        if isequal(openFiles(i), tf)
+            close(openFiles(i));
+            break;
+        end
+    end
+catch ME
+    st_log(cfg, 'WARN', ...
+        'Standalone copied Test File fallback close failed | %s', ME.message);
+end
+try
+    if bdIsLoaded(cfg.TopModel)
+        loadedFile = char(get_param(cfg.TopModel, 'FileName'));
+        if is_under_root(loadedFile, workRoot)
+            close_system(cfg.TopModel, 0);
+        end
+    end
+catch ME
+    st_log(cfg, 'WARN', ...
+        'Standalone copied Top Model fallback close failed | %s', ME.message);
 end
 end
 
@@ -325,12 +431,9 @@ else
 end
 end
 
-function restore_environment(previousDirectory, workRoot)
+function restore_environment(previousDirectory, previousPath)
 cd(previousDirectory);
-try
-    rmpath(genpath(workRoot));
-catch
-end
+path(previousPath);
 end
 
 function close_harness_quietly(owner, harness)

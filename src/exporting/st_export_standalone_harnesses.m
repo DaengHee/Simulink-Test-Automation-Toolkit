@@ -3,17 +3,14 @@ function [bundlePaths, details] = st_export_standalone_harnesses( ...
 %ST_EXPORT_STANDALONE_HARNESSES Export Harnesses from a disposable copy.
 
 p = inputParser;
-addParameter(p, 'ModelNameMode', 'HARNESS', ...
-    @(x) ismember(upper(string(x)), ["HARNESS","TARGET_HARNESS"]));
 addParameter(p, 'LogConfig', [], @(x) isempty(x) || isstruct(x));
 parse(p, varargin{:});
-modelNameMode = upper(char(string(p.Results.ModelNameMode)));
 logConfig = p.Results.LogConfig;
 
 totalTimer = tic;
 log_message(logConfig, 'INFO', ...
-    'Standalone Harness export start | Targets=%d | NameMode=%s', ...
-    height(targets), modelNameMode);
+    'Standalone Harness export start | Targets=%d | NameMode=HARNESS', ...
+    height(targets));
 
 if ~isfile(sourceModelFile)
     error('simtest:AssetModelMissing', ...
@@ -98,9 +95,6 @@ for i = 1:height(targets)
         targets.CUTPath(i), topModel));
     harnessName = char(string(targets.HarnessName(i)));
     key = string(lower(sourceOwner)) + "|" + string(lower(harnessName));
-    if strcmp(modelNameMode, 'TARGET_HARNESS')
-        key = string(round(double(targets.No(i)))) + "|" + key;
-    end
     existing = find(keys == key, 1);
     if ~isempty(existing)
         bundlePaths(i) = keyPaths(existing);
@@ -119,8 +113,7 @@ for i = 1:height(targets)
 
     outputFolder = fullfile(destination, target_folder(targets(i,:)));
     if ~isfolder(outputFolder), mkdir(outputFolder); end
-    outputModel = standalone_model_name(harnessName, targets(i,:), ...
-        modelNameMode);
+    outputModel = standalone_model_name(harnessName);
     outputPath = fullfile(outputFolder, [outputModel '.slx']);
 
     previousFolder = pwd;
@@ -227,17 +220,8 @@ error('simtest:StandaloneWorkDirectoryUnavailable', ...
     parentDirectory);
 end
 
-function name = standalone_model_name(harnessName, row, mode)
-if strcmp(mode, 'TARGET_HARNESS')
-    name = sprintf('st_h_%04d_%s', round(double(row.No)), ...
-        st_export_safe_name(harnessName));
-    name = matlab.lang.makeValidName(name);
-    if numel(name) > namelengthmax
-        name = name(1:namelengthmax);
-    end
-else
-    name = char(harnessName);
-end
+function name = standalone_model_name(harnessName)
+name = char(harnessName);
 if ~isvarname(name) || numel(name) > namelengthmax
     error('simtest:AssetHarnessNameInvalidForModel', ...
         ['HarnessName must also be a valid standalone Simulink model ' ...

@@ -43,7 +43,17 @@ addParameter(p, 'ExecutionModelMode', 'ORIGINAL', ...
     @(x) ischar(x) || isstring(x));
 parse(p, varargin{:});
 
-cfg = st_require_runtime_target();
+% Export operates on saved files and manages any temporary model loads in
+% its own scoped helpers. Do not let runtime-target validation load the
+% source before the caller-visible entry state is captured below.
+cfg = st_require_runtime_target('LoadModel', false);
+% Capture the caller-visible model state before dependency analysis or any
+% Harness API can load the model as an implementation side effect. Later
+% cleanup must use this baseline, not the state observed midway through the
+% export, because that intermediate state may already be contaminated.
+topModelWasLoadedAtEntry = bdIsLoaded(cfg.TopModel);
+modelSessionCleanup = onCleanup(@() restore_top_model_load_state( ...
+    cfg.TopModel, topModelWasLoadedAtEntry)); %#ok<NASGU>
 destination = strtrim(char(string(p.Results.Destination)));
 if isempty(destination)
     destination = cfg.ExportRootDir;
@@ -135,6 +145,8 @@ else
         '(asset profile copies the Harness container model only)\n']);
 end
 assert_saved_dependency_models(dependencyFiles);
+normalize_top_model_load_state(cfg, topModelWasLoadedAtEntry, ...
+    'dependency analysis');
 st_log(cfg, 'DEBUG', 'Dependency analysis done | count=%d', ...
     numel(dependencyFiles));
 fprintf('Dependencies : %d\n', numel(dependencyFiles));
@@ -224,8 +236,7 @@ if strcmp(executionModelMode, 'STANDALONE_HARNESS')
     standaloneDirectory = fullfile(workspaceDirectory, 'standalone');
     [~, standaloneDetails] = st_export_standalone_harnesses( ...
         cfg.ModelFile, cfg.TopModel, targets, standaloneDirectory, ...
-        stagingDirectory, 'ModelNameMode', 'TARGET_HARNESS', ...
-        'LogConfig', cfg);
+        stagingDirectory, 'LogConfig', cfg);
     finish_step(currentStage, stageTimer);
 end
 
@@ -233,7 +244,8 @@ currentStage = 'Collect Target Inputs';
 stageTimer = start_step(currentStage);
 sldvManifestBundlePath = '';
 targetInventory = collect_target_inputs( ...
-    targets, cfg, stagingDirectory, templateDirectory);
+    targets, cfg, stagingDirectory, templateDirectory, ...
+    topModelWasLoadedAtEntry);
 for i = 1:numel(targetInventory)
     targetInventory(i).StandaloneModel = ...
         standaloneDetails(i).StandaloneModel;
@@ -249,9 +261,8 @@ if isfile(cfg.SldvManifestFile)
     sldvManifestBundlePath = ...
         bundle_path(stagingDirectory, sldvManifestOutput);
 end
-if strcmp(executionModelMode, 'STANDALONE_HARNESS')
-    assert_top_model_not_loaded(cfg.TopModel);
-end
+normalize_top_model_load_state(cfg, topModelWasLoadedAtEntry, ...
+    'target input collection');
 finish_step(currentStage, stageTimer);
 
 currentStage = 'Copy Reference Report';
@@ -491,6 +502,15 @@ function missing = drop_in_model_name_false_positives(missing, topModel, cfg)
 if isempty(missing)
     return;
 end
+wasLoadedBefore = bdIsLoaded(topModel);
+if ~wasLoadedBefore
+    load_system(cfg.ModelFile);
+end
+inspectionCleanup = onCleanup(@() restore_top_model_load_state( ...
+    topModel, wasLoadedBefore)); %#ok<NASGU>
+st_log(cfg, 'DEBUG', ...
+    'Dependency false-positive inspection start | Candidates=%d', ...
+    numel(missing));
 keep = true(size(missing));
 for i = 1:numel(missing)
     name = missing{i};
@@ -508,6 +528,10 @@ for i = 1:numel(missing)
     end
 end
 missing = missing(keep);
+clear inspectionCleanup;
+st_log(cfg, 'DEBUG', ...
+    'Dependency false-positive inspection complete | Remaining=%d', ...
+    numel(missing));
 end
 
 function products = discover_products(files)
@@ -526,18 +550,24 @@ end
 end
 
 function inventory = collect_target_inputs( ...
-        targets, cfg, bundleRoot, templateRoot)
+        targets, cfg, bundleRoot, templateRoot, topModelWasLoadedAtEntry)
 inventory = repmat(empty_target(), 0, 1);
-% sltest.harness.load below loads cfg.TopModel as a side effect when it is
-% not already loaded. Only close_harness is called afterward (the Harness,
-% not the model), so without this restore the model is left loaded when it
-% was not before. A later step (or a later STEP234 run's bundle runner)
-% can then find a model with the same name already loaded from outside
-% the bundle. Best-effort only: warn instead of erroring here so a
-% genuine failure inside the loop is never masked by a cleanup-time error.
-topModelWasLoaded = bdIsLoaded(cfg.TopModel);
+% A subsystem owner path is not a valid Simulink object until its top model
+% is loaded. Load the saved source explicitly for this scope rather than
+% relying on sltest.harness.load to do so: R2025b rejects an unloaded
+% subsystem path before it can resolve the Harness. Cleanup still uses the
+% export-entry baseline, so a model opened only for input collection is
+% closed again before the standalone bundle runner starts.
 collectCleanup = onCleanup( ...
-    @() restore_top_model_load_state(cfg.TopModel, topModelWasLoaded)); %#ok<NASGU>
+    @() restore_top_model_load_state( ...
+        cfg.TopModel, topModelWasLoadedAtEntry)); %#ok<NASGU>
+if ~bdIsLoaded(cfg.TopModel)
+    st_log(cfg, 'DEBUG', ...
+        'Target input source model load start | Model=%s', cfg.TopModel);
+    load_system(cfg.ModelFile);
+    st_log(cfg, 'DEBUG', ...
+        'Target input source model load complete | Model=%s', cfg.TopModel);
+end
 for i = 1:height(targets)
     row = targets(i, :);
     item = empty_target();
@@ -621,25 +651,26 @@ end
 clear collectCleanup;
 end
 
-function assert_top_model_not_loaded(topModel)
-%ASSERT_TOP_MODEL_NOT_LOADED Isolation guard before the bundle runner
-% starts. The exported bundle loads its own copy of topModel under the
-% same name; if the source is still loaded here, the bundle runner would
-% either collide with it (simtest:BundleModelAlreadyLoaded, a safety
-% check this function does not replace) or silently exercise the wrong
-% copy. Never auto-saves or auto-discards a dirty model.
-if ~bdIsLoaded(topModel)
-    return;
+function normalize_top_model_load_state(cfg, wasLoadedAtEntry, context)
+%NORMALIZE_TOP_MODEL_LOAD_STATE Remove only exporter-created load state.
+st_log(cfg, 'DEBUG', ...
+    'Export model session normalization start | Context=%s | LoadedAtEntry=%d', ...
+    context, logical(wasLoadedAtEntry));
+restore_top_model_load_state(cfg.TopModel, wasLoadedAtEntry);
+if ~wasLoadedAtEntry && bdIsLoaded(cfg.TopModel)
+    dirtyText = '';
+    if strcmp(get_param(cfg.TopModel, 'Dirty'), 'on')
+        dirtyText = ' The model became dirty and was not discarded.';
+    end
+    st_log(cfg, 'ERROR', ...
+        ['Export model session normalization failed | Context=%s | ' ...
+         'Model=%s%s'], context, cfg.TopModel, dirtyText);
+    error('simtest:ExportModelSessionRestoreFailed', ...
+        ['%s was unloaded when export started but remains loaded after ' ...
+         '%s.%s'], cfg.TopModel, context, dirtyText);
 end
-dirtyText = '';
-if strcmp(get_param(topModel, 'Dirty'), 'on')
-    dirtyText = ' It has unsaved changes; save or discard them first.';
-end
-error('simtest:StandaloneModelStillLoadedBeforeRun', ...
-    ['%s is still loaded after collecting standalone export inputs. ' ...
-     'It must not be loaded when the exported bundle runs, since the ' ...
-     'bundle loads its own copy under the same name.%s'], ...
-    topModel, dirtyText);
+st_log(cfg, 'DEBUG', ...
+    'Export model session normalization complete | Context=%s', context);
 end
 
 function restore_top_model_load_state(topModel, wasLoadedBefore)

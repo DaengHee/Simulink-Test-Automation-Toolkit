@@ -74,9 +74,9 @@ verifyTrue(testCase, contains(assetText, ...
 verifyTrue(testCase, contains(assetText, ...
     'temporaryModelFile = fullfile(workRoot, [sourceName extension])'));
 verifyTrue(testCase, contains(assetText, ...
-    'sessionCleanup = onCleanup(@cleanup_export_session)'));
+    'sessionCleanup = onCleanup(@() cleanup_export_session(state))'));
 verifyTrue(testCase, contains(assetText, ...
-    'function cleanup_export_session()'));
+    'function cleanup_export_session(state)'));
 verifyTrue(testCase, contains(assetText, 'clear sessionCleanup;'));
 verifyTrue(testCase, contains(assetText, ...
     'close_model(topModel);'));
@@ -85,7 +85,7 @@ verifyTrue(testCase, contains(assetText, ...
 verifyTrue(testCase, contains(assetText, ...
     "sltest.harness.find(topModel, 'OpenOnly', 'on')"));
 verifyTrue(testCase, contains(assetText, ...
-    "sourceWasOpen = strcmp(get_param(topModel, 'Open'), 'on')"));
+    "state('SourceWasOpen') = strcmp(get_param(topModel, 'Open'), 'on')"));
 verifyTrue(testCase, contains(assetText, 'sltest.harness.open('));
 verifyTrue(testCase, contains(assetText, ...
     "error('simtest:AssetUnsavedHarness'"));
@@ -97,12 +97,12 @@ verifyFalse(testCase, contains(assetText, 'modelCleanup = onCleanup'));
 verifyFalse(testCase, contains(assetText, 'copied_owner_path'));
 
 cleanupText = extractAfter(string(assetText), ...
-    'function cleanup_export_session()');
-closePosition = strfind(cleanupText, 'close_model(topModel);');
-loadPosition = strfind(cleanupText, 'load_system(sourceModelFile);');
-openPosition = strfind(cleanupText, 'open_system(topModel)');
+    'function cleanup_export_session(state)');
+closePosition = strfind(cleanupText, "close_model(state('TopModel'));");
+loadPosition = strfind(cleanupText, "load_system(state('SourceModelFile'));");
+openPosition = strfind(cleanupText, "open_system(state('TopModel'))");
 restorePosition = strfind(cleanupText, ...
-    'restore_source_harnesses(openHarnesses);');
+    "restore_source_harnesses(state('OpenHarnesses'));");
 verifyLessThan(testCase, closePosition(1), loadPosition(1));
 verifyLessThan(testCase, loadPosition(1), openPosition(1));
 verifyLessThan(testCase, openPosition(1), restorePosition(1));
@@ -311,6 +311,11 @@ text = fileread(fullfile(root, 'src', 'exporting', ...
 verifyTrue(testCase, contains(text, 'drop_in_model_name_false_positives'));
 verifyTrue(testCase, contains(text, ...
     "find_system(topModel, 'FindAll', 'on', 'Name', name)"));
+verifyTrue(testCase, contains(text, ...
+    'wasLoadedBefore = bdIsLoaded(topModel)'));
+verifyTrue(testCase, contains(text, 'load_system(cfg.ModelFile)'));
+verifyTrue(testCase, contains(text, ...
+    'restore_top_model_load_state( ...'));
 end
 
 

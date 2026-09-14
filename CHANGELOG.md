@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replaced the standalone coverage `STEP*` interface with the default
+  `ALL` workflow and explicit `EXECUTE`, `PACKAGE`, and `SUMMARY` actions.
+  Each copied Test Case now runs once before one Result CVF registration;
+  live results avoid serialization in `ALL`, staged execution optionally
+  persists one aggregate Result, packaging emits one CVT and HTML report per
+  CUT, and `st_check_standalone_coverage` provides a read-only 10-bit summary.
 - Protected library-linked CUTs during Harness creation and reuse. Linked CUT
   Harnesses now use one-way `SyncOnOpen` synchronization, link status and
   reference identity are checked around create/clone operations, and automatic

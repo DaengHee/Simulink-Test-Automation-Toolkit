@@ -1,108 +1,114 @@
-# Standalone Harness Coverage Pipeline
+# Standalone Coverage Pipeline
 
-`st_run_standalone_coverage_pipeline`은 기존 프로젝트 자산을 직접 수정하지 않고,
-Harness를 standalone 모델로 내보낸 작업 사본에서 Test Case와 Coverage 결과를
-만드는 단계형 실행 명령이다. 제품 버전은 `0.9.6`을 유지한다.
+Standalone Coverage는 이미 준비가 끝난 Harness와 Test Case를 입력으로 사용한다.
+Harness 생성, Test Case 재생성, Expected 갱신이 필요하면 먼저
+`st_run_from_harness`를 실행한다. 실행 전 원본 Top Model과 Test File을 저장하고
+Top Model을 닫아 copied workspace와 같은 모델명이 충돌하지 않게 한다.
 
-## 실행 단계
+## 기본 실행
 
 ```matlab
-% Harness부터 Test Manager alignment까지만 준비
-st_run_standalone_coverage_pipeline('RunMode', 'STEP1');
+% EXECUTE -> PACKAGE -> SUMMARY
+info = st_run_standalone_coverage_pipeline();
 
-% export + TC 재연결 + CUT별 실행 + 결과 CVF 등록
-info = st_run_standalone_coverage_pipeline('RunMode', 'STEP234');
+% 생성된 결과를 읽기 전용으로 한 화면에서 확인
+[code, summary, details] = st_check_standalone_coverage();
+```
 
-% 새 MATLAB 세션에서 최종 산출물과 Excel 재개
+전체 계약을 통과한 코드만 `1111111111`이다. 화면 출력은 최대 20줄이며,
+전체 CUT 결과는 `details` table에서 확인한다.
+
+## Action별 실행과 재개
+
+```matlab
+% EXECUTE 단독 실행은 재개용 aggregate Result를 기본 저장한다.
+info = st_run_standalone_coverage_pipeline( ...
+    'Action', 'EXECUTE');
+
+% 새 MATLAB 세션에서 저장 Result를 한 번 import해 패키징한다.
 st_run_standalone_coverage_pipeline( ...
-    'RunMode', 'STEP5', 'PipelineId', info.PipelineId);
+    'Action', 'PACKAGE', ...
+    'PipelineId', info.PipelineId);
+
 st_run_standalone_coverage_pipeline( ...
-    'RunMode', 'STEP6', 'PipelineId', info.PipelineId);
-
-% STEP234부터 STEP6까지 연속 실행
-info = st_run_standalone_coverage_pipeline('RunMode', 'STEP2_TO_6');
+    'Action', 'SUMMARY', ...
+    'PipelineId', info.PipelineId);
 ```
 
-`PipelineId`를 생략하거나 `LATEST`로 지정한 `STEP234`/`STEP2_TO_6`은 새 ID를
-만든다. `STEP5`/`STEP6`의 기본 `LATEST`는
-`result/standalone_coverage/latest.json`이 가리키는 기존 실행을 읽는다.
+| Action | 역할 |
+|---|---|
+| `EXECUTE` | standalone export, copied Test Case 재연결, Test Case 1회 실행, CVF 1회 등록 |
+| `PACKAGE` | Model/Input/CVF/CVT/HTML/Test File 패키징 |
+| `SUMMARY` | manifest scalar에서 `CoverageSummary.xlsx` 생성 |
+| `ALL` | 세 Action 연속 실행, 기본값 |
 
-## 출력 루트가 깊게 중첩된 저장소에서 경로 길이 초과
+`SaveTestResult` 기본값은 `ALL=false`, `EXECUTE=true`이다. `ALL`은 live Result를
+PACKAGE로 전달하므로 export/import를 수행하지 않는다. `PACKAGE`와 `SUMMARY`에는
+`SaveTestResult`를 지정할 수 없다. lifecycle 횟수를 보존하기 위해 각 PipelineId의
+`PACKAGE`와 `SUMMARY`는 한 번만 실행할 수 있으며, 다시 생성해야 하면 새
+`EXECUTE`로 새 PipelineId를 만든다.
 
-이 pipeline은 export한 Harness 모델을
-`template/workspace/standalone/{CUTName}/...`까지 여러 단계로 중첩한다.
-저장소 checkout 경로 자체가 깊으면(예: 회사 표준 폴더 구조) 합쳐진 전체 경로가
-Windows 260자 제한(`MATLAB:cd:DirectoryNameTooLong`)을 넘을 수 있다.
+이전 `RunMode`와 준비 옵션을 전달하면 새 Action API와 `st_run_from_harness`를
+안내하는 migration 오류가 발생한다.
 
-출력 루트를 프로젝트 바깥의 짧은 경로로 옮기면 해결된다. 이 설정은 로컬
-`runtime_target.mat`에 저장되므로 저장소 기본값(`st_config.m`)에는 영향이
-없고, 머신마다 따로 지정한다.
+## 산출물
 
-```matlab
-st_set_standalone_coverage_root('D:\stt_work');
-```
+각 CUT 폴더에는 다음 필수 산출물만 둔다.
 
-원래 기본값(저장소 아래 `result/standalone_coverage`)으로 되돌리려면:
+- Harness명과 같은 파일 stem의 standalone model
+- Signal Editor Input MAT(대상에 Input이 있을 때)
+- CVF
+- CVT
+- Test Manager HTML report와 root `report.html`
+- target manifest
 
-```matlab
-st_set_standalone_coverage_root('');
-```
+파이프라인 root에는 copied Test File, pipeline manifest, JSONL lifecycle event log,
+`CoverageSummary.xlsx`가 생성된다. `SaveTestResult=true`일 때만 aggregate Result가
+추가된다.
 
-## 필수 Targets 정책
+`FilteredResults.mldatx`, `coverage-metrics.mat`, `TestSummary.xlsx`, PDF와 별도
+`cvhtml` coverage 파일은 standalone 산출물로 만들지 않는다.
 
-이 pipeline은 결과 필터가 선택 사항이 아니므로 모든 활성 대상에서 다음 설정을
-검증한다.
+## CoverageSummary.xlsx
 
-- `CoverageFilterMode=ALL_CONTENT`
-- `CoverageBoundaryMode=CUT_ONLY`
-- `CoverageFilterAction=EXCLUDE`
-- `CoverageFilterRationale`이 비어 있지 않음
-- `cfg.CoverageFilterExistingPolicy='REPLACE'`
-
-CVF는 standalone 모델의 SID로 다시 생성된다. CUT 외부 최상위 Subsystem은
-`SubsystemAllContent`, CUT 외부 나머지 최상위 블록은 `BlockInstance`, CUT 직계
-하위 Subsystem은 `SubsystemAllContent`로 제외한다. CUT 자체와 recursive 손자
-Subsystem은 직접 rule로 추가하지 않는다.
-
-일반 `PER_CUT` 실행은 기존처럼 실행 중 필터를 적용한다. 이 pipeline만
-`ResultFilterMode=POST_RUN_REQUIRED`를 사용해 필터 없는 전체 Coverage를 먼저
-수집한다. 따라서 기존 Test File/Suite/Test Case 필터를 병합하는 `MERGE`는 이
-pipeline에서 거부한다. 실행 후 `cvdata.filter`에 CVF 절대 경로를 등록하며, 등록 뒤
-`decisioninfo`/`executioninfo`, MLDATX export/import와 filter readback이 모두
-성공해야 해당 CUT가 성공한다.
-
-## 결과 구조
+`CoverageSummary` sheet의 열은 다음 순서로 고정한다.
 
 ```text
-result/standalone_coverage/<PipelineId>/
-├─ pipeline-manifest.json
-├─ logs/
-├─ TestManager/<TopModel>.mldatx
-├─ 001_<CUT>/
-│  ├─ <standalone-model>.slx
-│  ├─ <CUT>_Input.mat
-│  ├─ <CUT>_CoverageFilter.cvf
-│  ├─ <CUT>_CoverageResult.cvt
-│  ├─ target-manifest.json
-│  └─ <CUT>_TestReport/
-│     ├─ report.html
-│     └─ coverage/
-├─ CoverageSummary.xlsx
-└─ .work/
+NUM
+CUT_NAME
+CUT_PATH
+Test Case Name
+Harness Name
+Decision (%)
+Execution (%)
 ```
 
-`CoverageSummary.xlsx`는 실패 CUT도 한 행으로 유지한다. Decision 또는 Execution
-분모가 없으면 manifest의 숫자는 `NaN`이며 Excel 백분율은 `N/A`다.
-`.work`는 재개와 checksum 감사 증거이므로 성공 후에도 유지한다.
+Decision/Execution 분모가 0이거나 값이 없으면 `N/A`이다. metric source는 Result
+coverage API와 standalone CUT path의 단일 일치를 요구한다. 둘 이상의 후보가
+일치하면 `AMBIGUOUS`로 실패한다. 실제 R2025b HTML Details와 대조하기 전 source
+상태는 `PROVISIONAL`이다.
 
-## 안전 경계와 검증 상태
+## 한 화면 검사 비트
 
-STEP234 전후에 원본 모델, Test File, 관리 Excel checksum과 모델/Test File Dirty
-상태, Harness inventory를 비교한다. 필터 복원 실패나 manifest checksum 손상은
-다른 CUT로 계속하지 않는 전역 안전 오류다. 개별 CUT 실행·보고서 오류는
-`ContinueOnFailure=true`에서 다음 CUT 처리를 계속한다.
+| 비트 | 검사 |
+|---|---|
+| B1 | manifest v2, Action, Result 저장/재개 정책, 주요 함수 중복 경로 |
+| B2 | Harness명 = standalone model명 = `.slx` stem |
+| B3 | SUT/iteration/input/assessment readback |
+| B4 | `RunCount=1`, rerun 없음, lifecycle event 일치 |
+| B5 | CVF 생성, rule/file/hash, Result 등록 1회 |
+| B6 | 필수 패키지와 금지 artifact 부재 |
+| B7 | Decision/Execution scalar 및 metric source |
+| B8 | Summary 파일, 7개 열, CUT row 수 |
+| B9 | 원본 model/Test File/Harness/Input/Excel 불변 |
+| B10 | filter restore, model/path cleanup, CUT 폴더 격리 |
 
-현재 개발 PC에는 MATLAB이 없으므로 구현은 정적 검사까지만 수행했다. MATLAB
-R2025b에서 새 세션 재개, Test Manager GUI의 Coverage Filters 표시, ZIP report,
-CVT/CVF readback, 다중 CUT와 원본 불변 증거를 확인하기 전에는 main에 통합하지
-않는다.
+`EXECUTE`까지만 끝난 상태처럼 아직 적용할 수 없는 PACKAGE/SUMMARY 비트는 `-`로
+표시하고 전체 상태는 `PARTIAL`을 반환한다. checker는 Result import, model load/save,
+Test Manager clear 또는 파일 생성을 수행하지 않는다.
+
+## 완료 기준
+
+정적 테스트만으로 runtime 완료를 주장하지 않는다. 실제 MATLAB R2025b에서
+`tests/integration/test_standalone_coverage_pipeline_runtime.m`과 multi-CUT acceptance를
+실행하고, 최종 checker 결과 `1111111111 PASS`를 확보해야 완료로 본다.

@@ -10,8 +10,6 @@ addParameter(p, 'RequireCoverage', false, ...
     @(x) islogical(x) && isscalar(x));
 addParameter(p, 'CoveragePath', '', ...
     @(x) ischar(x) || isstring(x));
-addParameter(p, 'ReadOnly', false, ...
-    @(x) islogical(x) && isscalar(x));
 addParameter(p, 'RequireExactSet', false, ...
     @(x) islogical(x) && isscalar(x));
 parse(p, varargin{:});
@@ -20,8 +18,7 @@ totalTimer = tic;
 st_log(cfg, 'INFO', 'Result coverage filter attach start');
 try
     filterFiles = resolve_filter_files(filterFiles);
-    coverageObjects = st_flatten_coverage_results( ...
-        getCoverageResults(resultObj));
+    coverageObjects = st_collect_result_coverage_objects(resultObj);
     result = struct( ...
         'CoverageObjectCount', numel(coverageObjects), ...
         'FilterFiles', filterFiles, ...
@@ -48,14 +45,15 @@ try
              'objects | elapsed=%.3f sec'], toc(totalTimer));
         return;
     end
+    st_log(cfg, 'DEBUG', ...
+        'Result coverage objects resolved | count=%d', ...
+        numel(coverageObjects));
 
     propertyValue = filter_property_value(filterFiles);
     metricCount = 0;
     for i = 1:numel(coverageObjects)
         cvd = coverageObjects{i};
-        if ~p.Results.ReadOnly
-            cvd.filter = propertyValue;
-        end
+        cvd.filter = propertyValue;
         returned = string(cvd.filter);
         returned = returned(:);
         returned(ismissing(returned)) = "";
@@ -81,9 +79,6 @@ try
             cvd, char(string(p.Results.CoveragePath)));
     end
     result.MetricReadbackCount = metricCount;
-    if p.Results.ReadOnly
-        result.Message = 'Coverage filter readback verified';
-    end
     st_log(cfg, 'INFO', ...
         'Result coverage filter attach complete | elapsed=%.3f sec', ...
         toc(totalTimer));
