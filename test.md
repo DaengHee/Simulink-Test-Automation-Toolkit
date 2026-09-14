@@ -1,14 +1,13 @@
-이 10개 CUT의 `CoverageBoundaryMode`가 진짜 `CUT_ONLY`인지 확인해볼게요.
+v2가 요구하는 4개 열(CoverageFilterMode/CoverageBoundaryMode/CoverageFilterAction/CoverageFilterRationale)이 지금 엑셀에 어떻게 되어있는지 전체를 확인해볼게요.
 
 ## 해보실 것
 
 ```matlab
-t = info.Targets;
-idx = find([t.No] >= 26 & [t.No] <= 35);
-for k = idx
-    fprintf('No=%d | %s | Boundary=%s\n', t(k).No, t(k).CUTName, ...
-        char(string(t(k).CoverageBoundaryMode)));
-end
+cfg = st_config();
+targets = st_load_targets(false);
+T = targets(:, {'No','CUTName','CoverageFilterMode','CoverageBoundaryMode', ...
+    'CoverageFilterAction','CoverageFilterRationale'});
+disp(T)
 ```
 
-결과 캡처해서 보여주세요.
+결과 전체를 캡처해서 보여주세요. (특히 No=1~6번이 다른 행이랑 뭐가 다른지 봐주시면 됩니다.)
