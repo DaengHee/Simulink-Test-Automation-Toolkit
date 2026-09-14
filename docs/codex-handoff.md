@@ -383,6 +383,13 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   짧게 바꾸고 `cvhtml`에는 긴 절대 출력 경로를 전달한 것이 결함이었다. 이제 report
   tree와 ZIP을 writable scratch 내부에서 완성하고, 260자 미만인 단일 ZIP만 evidence
   경로로 복사한다. R2025b 새 `ALL` 재검증이 필요하다.
+- 실제 새 `ALL`은 끝까지 성공했지만 packaged MLDATX를 Test Manager UI에서 직접
+  열면 `..._Harness1` standalone model을 찾지 못했다. MLDATX의 Model SUT는 Harness가
+  아니라 CUT별 package folder의 standalone `.slx`이고, 직접 load는 그 folder들을
+  MATLAB path에 추가하지 않는다. PACKAGE는 launcher를 TestManager folder에 함께
+  제공해 model path/load와 packaged CVF Test Case readback 후 GUI를 열도록 보강했다.
+  실행 때 Result coverage object에 CVF를 사후 연결하는 방식은 공식 `cvdata.filter`
+  API의 지원 범위다. capture는 이제 HTML 직전에 그 readback을 다시 강제한다.
 - 실제 R2025b에서 사용자가 Top Model을 열지 않았는데도 target 입력 수집 후
   `StandaloneModelStillLoadedBeforeRun`이 발생했다. export 중간 상태가 아니라
   `st_export_test_bundle` 진입 전 load 상태를 기준으로 dependency/Harness API가

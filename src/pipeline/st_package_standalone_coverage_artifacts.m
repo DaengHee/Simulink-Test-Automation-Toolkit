@@ -18,7 +18,7 @@ st_write_standalone_pipeline_manifest(outputRoot, manifest);
     resolve_results(manifest, runtimeContext, cfg);
 manifest.ResultImportCount = importCount;
 manifest.PackageResultSource = resultSource;
-manifest = package_test_file(manifest, pipelineRoot);
+manifest = package_test_file(manifest, pipelineRoot, cfg);
 
 for i = 1:numel(manifest.Targets)
     item = manifest.Targets(i);
@@ -127,7 +127,7 @@ end
 resultObj = roots{indices};
 end
 
-function manifest = package_test_file(manifest, pipelineRoot)
+function manifest = package_test_file(manifest, pipelineRoot, cfg)
 testManagerDirectory = fullfile(pipelineRoot, 'TestManager');
 if ~isfolder(testManagerDirectory), mkdir(testManagerDirectory); end
 if ~isfile(manifest.TestManagerWorkFile)
@@ -140,6 +140,21 @@ destination = fullfile(testManagerDirectory, [name extension]);
 copy_checked(manifest.TestManagerWorkFile, destination);
 manifest.TestManagerFile = destination;
 manifest.TestManagerSHA256 = st_file_signature(destination).SHA256;
+launcherSource = fullfile(st_project_root(), 'resources', ...
+    'standalone_coverage', 'open_standalone_coverage_test_manager.m');
+if ~isfile(launcherSource)
+    error('simtest:StandalonePipelineTestManagerLauncherMissing', ...
+        'Packaged Test Manager launcher template is missing: %s', ...
+        launcherSource);
+end
+launcher = fullfile(testManagerDirectory, ...
+    'open_standalone_coverage_test_manager.m');
+copy_checked(launcherSource, launcher);
+manifest.TestManagerLauncher = launcher;
+manifest.TestManagerLauncherSHA256 = st_file_signature(launcher).SHA256;
+st_log(cfg, 'INFO', ...
+    ['PACKAGE Test Manager launcher complete | TestFile=%s | ' ...
+     'Launcher=%s'], destination, launcher);
 end
 
 function item = package_target(item, resultObj, targetDirectory, cfg) %#ok<INUSD>

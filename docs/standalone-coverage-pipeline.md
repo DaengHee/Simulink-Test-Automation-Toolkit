@@ -97,6 +97,11 @@ CUT은 `decisioninfo`/`executioninfo`의 빈 결과를 유효한 `0/0`, `N/A` me
 legacy path 경계를 피하도록 짧은 writable scratch에서 report tree와 ZIP을 완성한 뒤
 ZIP만 package evidence 경로로 승격한다.
 
+패키지의 `TestManager` 폴더에는 rewired MLDATX와
+`open_standalone_coverage_test_manager.m` launcher가 함께 생성된다. standalone model은
+CUT별 target 폴더에 보존되므로 MLDATX를 직접 열지 않고 launcher로 model path/load와
+packaged CVF의 Test Case readback을 준비한 뒤 Test Manager를 열어야 한다.
+
 ## 한 화면 검사 비트
 
 | 비트 | 검사 |

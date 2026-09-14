@@ -431,7 +431,8 @@ for i = 1:n
                 char(TestCaseName(i)));
             [PackageEvidence(i), PackageEvidenceSHA256(i)] = ...
                 capture_package_evidence( ...
-                    results(i).FinalResult, row, targetDirectory, cfg);
+                    results(i).FinalResult, row, CVFPath(i), ...
+                    targetDirectory, cfg);
             PackageEvidenceStatus(i) = "OK";
             append_event(logPath, i, 'PACKAGE_EVIDENCE_DONE', ...
                 char(PackageEvidence(i)));
@@ -732,7 +733,7 @@ end
 
 
 function [evidencePath, evidenceHash] = capture_package_evidence( ...
-        resultObj, row, targetDirectory, cfg)
+        resultObj, row, coverageFilterPath, targetDirectory, cfg)
 timerValue = tic;
 modelName = optional_text(row, 'ExecutionModel');
 modelFile = optional_text(row, 'ExecutionModelFile');
@@ -770,6 +771,7 @@ try
             'Result contains no coverage objects for %s.', ...
             char(string(row.CUTName)));
     end
+    verify_package_report_filter(coverageObjects, row, coverageFilterPath, cfg);
     save_package_evidence_cvt(cvtPath, coverageObjects, cfg);
     st_log(cfg, 'INFO', ...
         ['Standalone package coverage data capture complete | CUT=%s | ' ...
@@ -814,6 +816,53 @@ catch ME
         'Standalone package evidence capture failed | CUT=%s | %s: %s', ...
         char(string(row.CUTName)), ME.identifier, ME.message);
     rethrow(ME);
+end
+
+function verify_package_report_filter(coverageObjects, row, coverageFilterPath, cfg)
+if ~st_coverage_filter_active(row)
+    st_log(cfg, 'DEBUG', ...
+        'Standalone original Coverage report CVF readback skipped | CUT=%s | inactive', ...
+        char(string(row.CUTName)));
+    return;
+end
+expected = char(string(coverageFilterPath));
+if isempty(expected) || ~isfile(expected)
+    error('simtest:StandalonePackageEvidenceCoverageFilterMissing', ...
+        'Coverage report CVF is missing for %s: %s', ...
+        char(string(row.CUTName)), expected);
+end
+for i = 1:numel(coverageObjects)
+    actual = string(coverageObjects{i}.filter);
+    actual = actual(:);
+    actual(ismissing(actual)) = "";
+    actual = actual(strlength(actual) > 0);
+    if ~filter_name_matches(expected, actual)
+        error('simtest:StandalonePackageEvidenceCoverageFilterLost', ...
+            ['Coverage object used for the original report lost its CVF. ' ...
+             'CUT=%s | Expected=%s | Actual=%s'], ...
+            char(string(row.CUTName)), expected, ...
+            char(strjoin(actual, ' | ')));
+    end
+    st_log(cfg, 'INFO', ...
+        ['Standalone original Coverage report CVF readback complete | ' ...
+         'CUT=%s | Object=%d | Filter=%s'], ...
+        char(string(row.CUTName)), i, expected);
+end
+end
+
+function tf = filter_name_matches(expected, actual)
+tf = any(strcmpi(string(expected), actual));
+if tf, return; end
+[~, expectedName, expectedExtension] = fileparts(expected);
+expectedKey = string([expectedName lower(expectedExtension)]);
+for i = 1:numel(actual)
+    [~, actualName, actualExtension] = fileparts(char(actual(i)));
+    actualKey = string([actualName lower(actualExtension)]);
+    if strcmpi(expectedKey, actualKey)
+        tf = true;
+        return;
+    end
+end
 end
 end
 

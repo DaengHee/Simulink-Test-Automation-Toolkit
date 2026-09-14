@@ -192,3 +192,42 @@ end
 
 `report.html`, `.cvt`가 모두 존재하고 각 `model closed` 값이 `1`이면 PACKAGE와
 cleanup 산출물 계약을 만족한다.
+
+## 6. 패키지 Test Manager 열기
+
+`TestManager` 폴더의 `.mldatx` 파일을 UI에서 직접 열지 않는다. 그 파일의 Model
+SUT는 원본 Harness가 아니라 CUT별로 패키징된 standalone `.slx`이며, 각 모델은 서로
+다른 target 폴더에 있다. 아래 launcher는 해당 폴더들을 MATLAB path에 추가하고 모델을
+명시적으로 load한 뒤, 각 Test Case에 패키징 CVF를 적용한 상태로 Test Manager를 연다.
+
+```matlab
+[m, ~] = st_load_standalone_pipeline_manifest( ...
+    cfg.StandaloneCoverageRootDir, info.PipelineId);
+
+assert(isfile(m.TestManagerLauncher), ...
+    '이 Pipeline은 Test Manager launcher가 없는 이전 패키지입니다.');
+run(m.TestManagerLauncher)
+```
+
+launcher가 출력하는 `Models=N | CVFs=N`에서 N이 target 수와 같아야 한다. 이후
+Test Manager의 Refresh/All이 `..._Harness1`을 찾지 못하면 launcher 출력 전체를
+공유한다.
+
+## 7. 원본 HTML의 CVF 적용 근거
+
+PIPELINE은 Test Manager 실행 뒤 `cvdata.filter`에 CVF를 붙이고, 그 동일 Coverage
+object로 `cvhtml`을 생성한다. 아래 표에서 active CUT의 `CVFRuleCount`,
+`ResultFilterAttachCount`, `ResultFilterStatus`가 각각 `0보다 큼`, `1`, `OK`이면
+원본 HTML 생성 전에 CVF readback이 완료된 것이다.
+
+```matlab
+[m, ~] = st_load_standalone_pipeline_manifest( ...
+    cfg.StandaloneCoverageRootDir, info.PipelineId);
+T = struct2table(m.Targets);
+disp(T(:, {'CUTName', 'CVFRuleCount', 'ResultFilterAttachCount', ...
+    'ResultFilterStatus', 'ExecutionCVFPath', 'PackagedCVF', 'ReportHTML'}));
+```
+
+Coverage의 공식 API는 simulation 후에도 `cvdata.filter`에 CVF 파일을 설정해 filter를
+적용할 수 있다. 따라서 report에서 제외된 항목은 일반 coverage percentage 변화만이
+아니라 Excluded/Justified 상태로 확인한다.

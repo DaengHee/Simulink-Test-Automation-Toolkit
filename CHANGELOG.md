@@ -12,6 +12,10 @@
   directory before promoting its ZIP. This avoids the Windows legacy path
   boundary that made long per-CUT names fail with a misleading read-only
   current-directory error.
+- Package a Test Manager launcher that resolves CUT-specific standalone
+  models and applies each packaged CVF before opening the rewired MLDATX.
+  Evidence capture now rechecks that every active coverage object still holds
+  the CVF used by the original `cvhtml` report.
 - Fixed `st_check_standalone_coverage` returning a 1-by-10 struct array. Its
   ten bit values now remain one field of a scalar summary struct.
 - PACKAGE target manifests now preserve the exception identifier, message, and
