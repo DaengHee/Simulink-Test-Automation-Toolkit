@@ -26,8 +26,9 @@ if bdIsLoaded(harnessName)
          '%s'], harnessName);
 end
 
-mode = char(string(items(1).synchronizationMode));
-if strcmpi(mode, 'SyncOnOpen')
+modeValue = items(1).synchronizationMode;
+mode = char(string(modeValue));
+if is_sync_on_open(modeValue)
     st_assert_cut_library_link_unchanged( ...
         linkState, cutPath, 'Harness synchronization readback');
     return;
@@ -50,7 +51,7 @@ st_log(cfg, 'DEBUG', ...
 readback = sltest.harness.find( ...
     cutPath, 'SearchDepth', 0, 'Name', harnessName);
 if numel(readback) ~= 1 || ...
-        ~strcmpi(char(string(readback(1).synchronizationMode)), 'SyncOnOpen')
+        ~is_sync_on_open(readback(1).synchronizationMode)
     error('simtest:HarnessLinkProtectionReadbackFailed', ...
         'Harness synchronization readback failed: %s / %s', ...
         cutPath, harnessName);
@@ -58,4 +59,21 @@ end
 st_assert_cut_library_link_unchanged( ...
     linkState, cutPath, 'Harness synchronization update');
 changed = true;
+end
+
+
+function tf = is_sync_on_open(value)
+% R2025b can report SynchronizationMode as numeric enum value 1.
+
+if isnumeric(value) || islogical(value)
+    tf = isscalar(value) && isfinite(double(value)) && double(value) == 1;
+    return;
+end
+
+try
+    text = string(value);
+    tf = isscalar(text) && strcmpi(strtrim(text), "SyncOnOpen");
+catch
+    tf = false;
+end
 end

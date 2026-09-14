@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- Fixed standalone Coverage packaging after per-CUT model cleanup. The
-  execution-workspace standalone model is now opened only while Test Manager
-  creates the official HTML report and extracts final metrics, then closed
-  without saving while preserving model isolation.
+- Fixed standalone Coverage reporting after per-CUT model cleanup. Each
+  official Test Manager report and final metric snapshot is now captured while
+  its execution model is still open; PACKAGE verifies and promotes that
+  evidence without reopening a detached Coverage context.
 - Replaced the standalone coverage `STEP*` interface with the default
   `ALL` workflow and explicit `EXECUTE`, `PACKAGE`, and `SUMMARY` actions.
   Each copied Test Case now runs once before one Result CVF registration;
