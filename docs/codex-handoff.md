@@ -426,6 +426,11 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   확인했다. controller는 PACKAGE 직전에 helper를 clear/rehash하고 활성 프로젝트
   경로와 `CAPTURED_EVIDENCE_V1` 구현 표식을 검증한 뒤 호출한다. 이 cache 격리
   수정의 R2025b 재검증은 아직 미수행이다.
+- cache 격리 적용 후 실제 `ALL`은 PACKAGE와 SUMMARY까지 완료했다. checker는
+  `0111100111`로 B1/B6/B7만 실패했으며, 진단 중 `Bits` cell이 struct constructor에서
+  펼쳐져 summary가 1x10 struct가 되는 오류를 확인했다. `Bits`를 cell wrapper로
+  감싸 scalar summary를 복구했다. 남은 B1/B6/B7의 세부 원인은 추가 runtime 출력이
+  필요하다.
 
 정적 검증: 변경·추가 MATLAB 파일 중 37개가 MISS_HIT UTF-8 검사에 통과했다.
 Signal Editor의 `import(reader)` 파서 오류는 Import 이전 기준 `7f0825e`에서도
