@@ -6,7 +6,7 @@
 t = info.Targets;
 for k = 1:numel(t)
     if strcmpi(t(k).ExecutionStatus, 'FAIL')
-        fprintf('No=%d | Harness=%s | CUT=%s\n', t(k).No, t(k).ExecutionModel, t(k).CUTName);
+        fprintf('No=%d | Harness=%s | CUT=%s\n', t(k).No, t(k).StandaloneModel, t(k).CUTName);
     end
 end
 ```
