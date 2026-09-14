@@ -48,8 +48,9 @@ if ~isempty(cfg)
     end
     st_log(cfg, level, ...
         ['Final CUT coverage metric collection complete | ' ...
-         'SourceStatus=%s | elapsed=%.3f sec'], ...
-        metrics.SourceStatus, toc(timerValue));
+         'SourceStatus=%s | Decision=%s | Execution=%s | elapsed=%.3f sec'], ...
+        metrics.SourceStatus, metrics.Decision.Status, ...
+        metrics.Execution.Status, toc(timerValue));
 end
 end
 
@@ -59,6 +60,10 @@ matches = rows.Level == "CUT" & strcmpi(rows.Metric, name) & ...
 indices = find(matches);
 value = empty_metric();
 if isempty(indices)
+    if strcmpi(name, 'Decision')
+        value = zero_decision_metric();
+        return;
+    end
     value.Status = 'MISSING';
     value.Message = sprintf('%s coverage row is unavailable.', name);
     return;
@@ -77,6 +82,19 @@ value.Percentage = percentage;
 value.PercentageText = char(text);
 value.Status = 'OK';
 value.Message = '';
+end
+
+function value = zero_decision_metric()
+% A matched CUT can have execution coverage but no decision objectives.
+% decisioninfo documents this case as an empty result, which is a valid
+% zero-denominator metric rather than a collection failure.
+value = empty_metric();
+value.Covered = 0;
+value.Total = 0;
+value.Percentage = NaN;
+value.PercentageText = 'N/A';
+value.Status = 'OK';
+value.Message = 'No Decision coverage objectives matched this CUT.';
 end
 
 function value = empty_metric()

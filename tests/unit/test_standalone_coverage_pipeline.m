@@ -176,6 +176,20 @@ rewireIsolationAt = rewireIsolationAt( ...
 verifyLessThan(testCase, rewireIsolationAt(1), rewireCleanupAt(1));
 end
 
+function testDecisionWithoutObjectivesUsesValidZeroDenominatorMetric(testCase)
+metrics = source('reporting', 'st_collect_final_cut_coverage_metrics.m');
+prepare = source('execution', 'st_prepare_standalone_bundle_execution.m');
+verifyTrue(testCase, contains(metrics, "if strcmpi(name, 'Decision')"));
+verifyTrue(testCase, contains(metrics, 'zero_decision_metric'));
+verifyTrue(testCase, contains(metrics, ...
+    "'No Decision coverage objectives matched this CUT.'"));
+verifyTrue(testCase, contains(metrics, 'value.Total = 0'));
+verifyTrue(testCase, contains(prepare, ...
+    'StandaloneCoverageMetricSettingsReadbackFailed'));
+verifyTrue(testCase, contains(prepare, "contains(metricSettings, 'd')"));
+verifyTrue(testCase, contains(prepare, "contains(metricSettings, 'e')"));
+end
+
 function testSummaryUsesExactSevenColumns(testCase)
 text = source('pipeline', ...
     'st_export_standalone_coverage_summary.m');

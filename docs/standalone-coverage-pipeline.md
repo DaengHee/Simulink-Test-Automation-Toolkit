@@ -88,7 +88,8 @@ Execution (%)
 Decision/Execution 분모가 0이거나 값이 없으면 `N/A`이다. metric source는 Result
 coverage API와 standalone CUT path의 단일 일치를 요구한다. 둘 이상의 후보가
 일치하면 `AMBIGUOUS`로 실패한다. 실제 R2025b HTML Details와 대조하기 전 source
-상태는 `PROVISIONAL`이다.
+상태는 `PROVISIONAL`이다. Decision objective가 없는 CUT은 `decisioninfo`의 빈
+결과를 유효한 `0/0`, `N/A` Decision metric으로 기록한다.
 
 ## 한 화면 검사 비트
 

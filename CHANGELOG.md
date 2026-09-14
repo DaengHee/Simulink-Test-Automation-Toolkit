@@ -12,6 +12,8 @@
   ten bit values now remain one field of a scalar summary struct.
 - PACKAGE target manifests now preserve the exception identifier, message, and
   call stack; checker details surface the first failing source location.
+- Treat a matched CUT with no Decision coverage objectives as the valid
+  zero-denominator metric (`0/0`, `N/A`) instead of an incomplete package.
 - Replaced the standalone coverage `STEP*` interface with the default
   `ALL` workflow and explicit `EXECUTE`, `PACKAGE`, and `SUMMARY` actions.
   Each copied Test Case now runs once before one Result CVF registration;
