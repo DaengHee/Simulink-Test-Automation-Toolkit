@@ -1,0 +1,848 @@
+# Simulink Test Automation Toolkit 운영자 매뉴얼
+
+이 문서는 MATLAB 사용자가 저장소를 처음 연 시점부터 모델 선택, CUT 경로
+준비, Harness·SLDV·Test Case 생성, 테스트 실행, 검증, 번들 내보내기와 결과
+정리까지 수행하는 순서를 설명합니다. 내부 helper가 아니라 사용자가 직접
+호출하는 공개 `st_*` 명령을 중심으로 작성합니다.
+
+실제로 실행하지 않은 단계는 완료된 것으로 판단하지 않습니다. 현재 기준
+환경은 MATLAB R2025b이며 전체 runtime 인증 상태는 `docs/verification.md`를
+따릅니다.
+
+## 1. 가장 짧은 시작 순서
+
+Harness가 없는 일반적인 최초 실행:
+
+```matlab
+st_setup
+st_select_target_model
+st_pre_validate_targets
+st_run_from_harness
+```
+
+Harness가 이미 있는 실행:
+
+```matlab
+st_setup
+st_select_target_model
+st_validate_targets
+st_run_after_harness
+```
+
+기존 SLDV MAT를 사용해 Test Case까지만 만들고 테스트를 실행하지 않는 경우:
+
+1. `Targets.SldvMode`를 `FILE`로 설정합니다.
+2. `Targets.SldvDataFile`에 `TestManagement.xlsx` 기준 상대경로 또는 절대경로를
+   입력합니다.
+3. `st_config.m`에서 `cfg.RunGeneratedTests = false`로 설정합니다.
+4. 기존 Harness가 있으므로 다음을 실행합니다.
+
+```matlab
+st_setup
+st_select_target_model
+st_run_after_harness
+```
+
+## 2. 실행 전 필수 확인
+
+### 2.1 제품
+
+| 제품 | 필요한 경우 |
+| --- | --- |
+| MATLAB R2025b | 모든 기능 |
+| Simulink | 모든 모델 작업 |
+| Simulink Test | Harness, Test Manager, Test 실행 |
+| Simulink Coverage | 통합 Coverage와 종합 검증 |
+| Simulink Design Verifier | `SldvMode=GENERATE`; `FILE`은 기존 결과 사용 |
+
+### 2.2 사용자 입력 파일
+
+| 파일 | Git 관리 | 설명 |
+| --- | --- | --- |
+| Top Model 및 dependency | 보통 외부 | 테스트 대상 모델 |
+| `TestManagement.xlsx` | 실제 업무 파일은 제외 | `Targets` 시트 관리 입력 |
+| `runtime_target.mat` | 제외 | `st_select_target_model`이 생성 |
+| SLDV 결과 MAT 또는 일반 Dataset MAT | 제외 | `SldvMode=FILE` 입력 |
+| `{TopModel}.mldatx` | 제외 | 생성 또는 증분 갱신되는 Test File |
+
+모델, dependency, Test File과 Excel은 runtime 검증이나 번들 내보내기 전에
+저장합니다.
+
+### 2.3 변경 가능 범위
+
+| 분류 | 예시 | 변경 여부 |
+| --- | --- | --- |
+| 읽기 전용 | `st_pre_validate_targets`, QUICK 검증, 진단 명령 | 원본 모델을 의도적으로 저장하지 않음 |
+| 준비 변경 | Harness, Signal Editor, Assessment, Test Manager 구성 | 모델/Harness/Test File 변경 가능 |
+| 실행 변경 | expected-value `APPLY` | Assessment 기대값 변경 가능 |
+| 생성물 | `result/` 아래 report, state, SLDV, run, export, verification | 다시 생성 가능 |
+| 정리 | `st_cleanup_results` | `Apply=true`일 때 선택한 생성물 삭제 |
+
+## 3. 관리 Excel 핵심
+
+`TestManagement.xlsx`의 `Targets` 시트에는 다음 열을 사용합니다.
+
+| 열 | 필수 | 대표 값 |
+| --- | --- | --- |
+| `CUTName` | 예 | `Controller` |
+| `CUTPath` | 예 | `TopModel/Controller` |
+| `HarnessName` | 예 | `Controller_Harness` |
+| `TestCaseName` | 예 | `TC_Controller` |
+| `No` | 아니요 | `1` |
+| `Enabled` | 아니요 | `TRUE` |
+| `SldvMode` | 아니요 | `OFF`, `FILE`, `GENERATE` |
+| `SldvDataFile` | `FILE`에서 필수 | `sldv_data/Controller_sldvdata.mat` |
+| `DataFileFormat` | 아니요 | `SLDV`(기본), `MAT` |
+| `MatVariableName` | 아니요 | `FILE+MAT`에서 Dataset 변수 하나를 선택; 빈 값이면 이름순 전체 선택 |
+| `ExpectedUpdateMode` | 아니요 | `DEFAULT`, `OFF`, `APPLY` |
+| `CoverageFilterMode` | 아니요 | `OFF`, `SUBSYSTEM`, `ALL_CONTENT` |
+| `CoverageBoundaryMode` | 아니요 | `OFF`, `CUT_ONLY` |
+| `CoverageFilterAction` | 필터 사용 시 | `EXCLUDE`, `JUSTIFY` |
+| `CoverageFilterRationale` | 필터 사용 시 | 검토 가능한 근거 문구 |
+| `PreparationMode` | 아니요 | `DEFAULT`, `AUTO`, `FORCE` |
+| `PreparationFromStage` | 아니요 | `DEFAULT`, `SLDV`, `ASSESSMENT` 등 |
+
+`SldvDataFile` 상대경로는 MATLAB Current Folder가 아니라
+`TestManagement.xlsx`가 있는 폴더를 기준으로 해석합니다.
+
+## 4. 초기화와 설정
+
+### 4.1 `st_setup`
+
+목적:
+
+- 저장소 루트와 `src/` 전체를 MATLAB path에 추가합니다.
+- `diagnostics/matlab/`을 path에 추가합니다.
+- 없으면 `result/` 폴더를 만듭니다.
+
+사용:
+
+```matlab
+st_setup
+```
+
+MATLAB을 새로 시작했거나 저장소 위치를 바꾼 뒤 가장 먼저 실행합니다.
+
+### 4.2 `st_config`
+
+`st_config`는 직접 실행하는 workflow가 아니라 전체 기본 설정을 반환합니다.
+일반적으로 `src/config/st_config.m`을 검토하고 필요한 기본값만 수정합니다.
+Top Model 이름과 파일 경로는 이 파일에 수정하지 않습니다. 로컬 모델 선택은
+`st_select_target_model`로 수행하며 Git에서 제외된 `runtime_target.mat`에 저장됩니다.
+
+자주 확인하는 값:
+
+```matlab
+cfg = st_config();
+cfg.RunGeneratedTests
+cfg.OverwriteTestFile
+cfg.ExpectedUpdateMode
+cfg.CoverageFilterApplicationMode
+cfg.CoverageFilterExistingPolicy
+cfg.PreparationMode
+cfg.CheckSharedSignalEditorDataFile
+cfg.IgnoreUnexpectedSldvInputs
+cfg.AllowSldvSubsystemPathMismatch
+cfg.SaveResultFiles
+```
+
+안전한 TC 생성 전용 설정 예시:
+
+```matlab
+cfg.RunGeneratedTests = false;
+cfg.OverwriteTestFile = false;
+cfg.ExpectedUpdateMode = 'OFF';
+cfg.CoverageFilterApplicationMode = 'RUNTIME';
+cfg.CoverageFilterExistingPolicy = 'REPLACE';
+```
+
+`CoverageFilterApplicationMode='RUNTIME'`은 `.cvf`를 실행 직전에 각 Test Case에
+API로 적용하고 실행 종료 또는 오류 시 기존 수동 필터로 복원합니다. `PERSIST`는
+Test Case별 필터 설정을 Test File에 저장합니다. 두 모드 모두 자동 필터를
+Test File 수준에는 기록하지 않습니다. 필터 규칙은 CUT 자체가 아니라 직속 하위
+Subsystem마다 생성합니다. `SUBSYSTEM`은 해당 블록 인스턴스만, `ALL_CONTENT`는
+해당 Subsystem과 내부 전체를 대상으로 하며 이 content rule에서는 일반 블록을
+직접 선택하지 않습니다. 경계 모드도 OFF이고 직속 하위 Subsystem이 없으면 규칙
+0개짜리 CVF를 생성합니다. 생성한
+CVF는 다시 열어 규칙 수와 모드를 검증하며, 검증에 실패하면 해당 CUT 실행을
+실패로 기록합니다.
+
+`CoverageBoundaryMode=CUT_ONLY`는 위 설정과 독립적으로 조합합니다. 실제 실행
+Harness 또는 standalone 모델에서 CUT와 이름·인터페이스가 일치하는 블록을 찾고,
+CUT 외부 최상위 Subsystem에는 `SubsystemAllContent`, 나머지 최상위 블록에는
+`BlockInstance` EXCLUDE 규칙을 표준 사유로 추가합니다. 따라서
+`CoverageFilterMode=OFF + CoverageBoundaryMode=CUT_ONLY`도 CVF를 생성하며
+`ExecutionMode=AUTO`는 `PER_CUT`을 선택합니다.
+
+실제 기본값은 파일을 수정해야 변경됩니다. Command Window에서 반환된 `cfg`만
+수정해도 다음 공개 명령의 새 `st_config()` 호출에는 반영되지 않습니다.
+
+`CoverageFilterExistingPolicy='REPLACE'`는 PER_CUT 실행 중 Test File, Test
+Suite, Test Case에 연결된 기존 CVF를 임시로 해제하고 새로 생성한 CVF만
+해당 Test Case 실행에 등록합니다. `SUBSYSTEM`은 직속 하위 Subsystem의
+`BlockInstance`만 필터링하고, `ALL_CONTENT`만 `SubsystemAllContent`로
+각 하위 Subsystem의 내부 일반 블록까지 필터링합니다. 결과 저장 시 CVF 복사본을
+함께 보존하지만 Test Manager의 결과 객체 참조는 변경하지 않습니다. 실행 후에는
+기존 연결을 복원합니다. 기존 CVF도 함께 적용하려면 `MERGE`로 변경합니다.
+
+실제 실행 후 selector와 복원 상태를 고정 6비트 코드로 점검하려면 다음 명령을
+사용합니다.
+
+```matlab
+[code, details] = st_check_per_cut_cvf();
+disp(details(:, {'No','TestCaseName','Code','Status','Message'}))
+```
+
+비트 순서는 산출물 무결성, 적용 수명주기, rule 수, 고유 block selector,
+활성 rule 범주, selector/action/rationale 정책입니다. `111111`만 전체 통과이며 문의 시
+`CVF-CHECK-v2` 출력 줄 전체를 전달합니다.
+
+현장 실행 전체를 한 번에 판정할 때는 다음 명령을 우선 사용합니다.
+
+```matlab
+summary = st_check_actual_system();
+disp(summary.Environment)
+disp(summary.Run)
+disp(summary.CVF)
+```
+
+출력의 `ENV`, `RUN`, `CVF`는 각각 6비트이며 전체 18비트가 모두 1이어야 자동
+점검을 통과합니다. ENV는 R2025b·제품·라이선스·입력 파일·API·MATLAB 경로를,
+RUN은 실행 pointer·CUT 순서·실행 완료·기대값 재실행·산출물·필터 복원을,
+CVF는 기존 selector 검사를 뜻합니다. 0이 있으면 대응 상세 표의 같은 비트 행을
+확인합니다. 시각적 보고서 내용과 Test Manager GUI 동작은 별도 수동 확인입니다.
+
+## 5. 모델 선택과 CUT 경로 준비
+
+### 5.1 `st_select_target_model`
+
+목적:
+
+- 설정된 검색 루트에서 SLX/MDL을 찾습니다.
+- 사용자가 Top Model을 선택하게 합니다.
+- 선택 결과를 `runtime_target.mat`에 저장합니다.
+
+사용:
+
+```matlab
+cfg = st_select_target_model();
+```
+
+모델을 다시 선택하려면:
+
+```matlab
+cfg = st_select_target_model(true);
+```
+
+생성물: 저장소 루트의 `runtime_target.mat`.
+
+### 5.2 `st_find_target_paths`
+
+목적:
+
+- `CUTName`과 같은 이름의 Subsystem 후보를 모델에서 찾습니다.
+- 주변에 이미 확정된 CUT와 Excel 행 문맥을 이용해 후보 순위를 계산합니다.
+- 한 행에서 확정된 Subsystem을 이후 행의 후보에서 제외합니다.
+- 모든 행이 해결되고 경로의 존재·타입·이름·고유성 검증을 통과한 경우에만
+  선택한 경로를 `Targets.CUTPath`에 한 번에 기록합니다.
+
+사용:
+
+```matlab
+R = st_find_target_paths();
+```
+
+기존의 유효한 `CUTPath`가 여러 enabled 행에 중복되어 있거나 선택을
+취소하면 관리 Excel은 변경되지 않습니다. indent와 행 순서는 추천 점수에만
+사용되며 후보를 강제로 제외하지 않습니다. Excel을 변경할 수 있는 명령이므로
+실행 전 workbook 백업과 저장 상태를 확인합니다.
+
+### 5.3 `st_export_subsystem_paths`
+
+목적:
+
+- 선택 모델에서 발견 가능한 Subsystem 경로 전체를 Excel의
+  `ModelSubsystems` 시트로 내보냅니다.
+- 사람이 확인해 `Targets.CUTPath`로 복사할 때 사용합니다.
+
+사용:
+
+```matlab
+R = st_export_subsystem_paths();
+```
+
+모델을 강제로 다시 선택하면서 실행:
+
+```matlab
+R = st_export_subsystem_paths(true);
+```
+
+### 5.4 `st_fill_temp_paths_from_indent`
+
+목적:
+
+- Excel 셀의 native indentation을 계층으로 해석해 빈 `CUTPath`를 채웁니다.
+- 기본값은 기존 수동 경로를 보존합니다.
+
+사용:
+
+```matlab
+R = st_fill_temp_paths_from_indent();
+```
+
+기존 경로도 덮어쓰려면:
+
+```matlab
+R = st_fill_temp_paths_from_indent(true);
+```
+
+`st_fill_temp_paths_from_depth`는 이전 호출과의 호환 wrapper입니다. 새 작업은
+indent 기반 명령을 사용합니다.
+
+## 6. 실행 전 검증
+
+### 6.1 `st_pre_validate_targets`
+
+Harness 생성 전 다음을 확인합니다.
+
+- `CUTPath`가 비어 있지 않음
+- 선택한 Top Model 기준 경로 정규화 가능
+- 블록 존재
+- 블록이 Subsystem임
+
+사용:
+
+```matlab
+R = st_pre_validate_targets();
+```
+
+결과: `result/reports/PreValidationResult.ini`.
+
+### 6.2 `st_validate_targets`
+
+기존 Harness workflow 전에 CUT와 Harness 연결을 확인합니다. 컴파일은 하지
+않습니다.
+
+```matlab
+R = st_validate_targets();
+```
+
+결과: `result/reports/ValidationResult.ini`.
+
+## 7. 권장 workflow 진입점
+
+### 7.1 `st_run_from_harness`
+
+Harness가 없을 수 있는 전체 workflow입니다.
+
+```matlab
+[resultObj, updateResult, workflowResult, reportInfo] = ...
+    st_run_from_harness();
+```
+
+순서:
+
+```text
+CUT 사전 검증
+→ Harness 생성
+→ SLDV 준비
+→ Harness 설정
+→ Signal Editor
+→ Assessment
+→ Test Manager
+→ Scenario 정렬 검증
+→ 선택적 Test 실행
+→ 선택적 통합 보고서
+```
+
+강제로 특정 단계부터 재적용하려면:
+
+```matlab
+st_run_from_harness( ...
+    'PreparationMode', 'FORCE', ...
+    'FromStage', 'SLDV');
+```
+
+실행 방식은 기본 `AUTO`입니다. 활성 Coverage 필터가 하나라도 있으면 모든 활성
+CUT을 개별 실행하고, 전부 `OFF`이면 기존 일괄 실행을 사용합니다.
+
+```matlab
+[results, updates, workflow, report] = st_run_from_harness( ...
+    'ExecutionMode', 'PER_CUT', ...
+    'ContinueOnFailure', true, ...
+    'ReportMode', 'SUMMARY', ...
+    'FailOnNonPass', false);
+```
+
+Test Case 판정이 `FAILED`, `UNTESTED`, `INCOMPLETE`여도 실행 자체가 완료되면
+`FinalOutcome`과 `WARN`으로 기록하고 다음 CUT을 실행합니다. `run(tc)` 또는 결과
+저장 중 예외가 발생한 경우에만 실행 실패(`FAIL`)로 기록됩니다.
+
+`BATCH`는 모든 활성 행의 `CoverageFilterMode`와 `CoverageBoundaryMode`가 모두
+`OFF`일 때만 허용됩니다.
+`SUMMARY`는 CUT별 MLDATX·Excel·경량 HTML, `FULL`은 여기에 PDF와 전체 Coverage
+HTML을 추가합니다. 필터 복원 실패는 다음 CUT로 진행하지 않는 안전 오류입니다.
+
+### 7.2 `st_run_after_harness`
+
+대상 Harness가 이미 존재할 때 사용합니다. Harness 생성 대신 기존 매핑을
+검증하고 SLDV 단계부터 진행합니다.
+
+```matlab
+[resultObj, updateResult, workflowResult, reportInfo] = ...
+    st_run_after_harness();
+```
+
+기존 SLDV MAT에서 TC까지만 만들 때는 `cfg.RunGeneratedTests=false`와 함께 이
+명령을 사용합니다.
+
+### 7.3 증분 실행
+
+기본 `AUTO`는 `result/state`의 성공 checkpoint와 현재 입력 fingerprint가
+같으면 준비 단계를 재사용합니다.
+
+문제 분석이나 재생성이 필요하면 한 번의 호출에서 `FORCE`를 지정합니다.
+
+```matlab
+st_run_after_harness( ...
+    'PreparationMode', 'FORCE', ...
+    'FromStage', 'SLDV');
+```
+
+오래된 checkpoint만 제거하려면 전체 결과 대신 다음 정리 명령을 사용합니다.
+
+```matlab
+st_cleanup_results('Scope', 'STATE', 'Apply', true);
+```
+
+## 8. 고급 단계별 명령
+
+정상 운영은 두 workflow 진입점을 권장합니다. 다음 명령은 단계별 진단이나
+부분 재현이 필요한 경우에만 직접 호출합니다.
+
+| 명령 | 역할 | 주요 결과 |
+| --- | --- | --- |
+| `st_create_harnesses` | 누락 Harness 생성 | `HarnessCreateResult.ini` |
+| `st_prepare_sldv_targets` | OFF/FILE/GENERATE 준비와 manifest 생성 | `SldvGenerationResult.ini`, `SldvScenarioResult.ini` |
+| `st_configure_harnesses` | StopTime 등 Harness 설정 | `HarnessConfigResult.ini` |
+| `st_configure_signal_editors` | Scenario MAT 생성·연결 | `SignalEditorResult.ini` |
+| `st_configure_assessments` | Test Assessment Scenario/verify 구성 | `AssessmentResult.ini` |
+| `st_create_test_manager` | Test File, TC, Iteration 구성 | `TestManagerResult.ini` |
+| `st_validate_scenario_alignment` | Scenario와 Iteration 정렬 확인 | `ScenarioAlignmentResult.ini` |
+| `st_run_generated_tests` | 선택된 Test Case 실행과 기대값 정책 적용 | Test Manager 결과 및 실행 보고서 입력 |
+| `st_run_tests_per_cut` | CUT별 transient CVF, 독립 실행·보고서·복원 검증 | `result/per_cut_runs`, `per_cut_latest.json` |
+
+단계별 명령을 임의 순서로 호출하면 SLDV manifest나 이전 단계 산출물이 없어
+실패할 수 있습니다.
+
+## 9. SLDV 운용
+
+### 9.1 `OFF`
+
+SLDV 없이 기존 단일 Scenario를 사용합니다.
+CUT에 직계 Inport가 없어도 Harness에 Signal Editor가 있으면 기존 ActiveScenario를
+`UT_REQ_{CUTName}_001`로 변경하고 Test Case의 `SignalEditorScenario`에 연결합니다.
+Harness에 Signal Editor 블록 자체가 없을 때만 입력 Scenario 없이 계속하며 WARN을
+기록합니다. 블록은 있지만 MAT 파일이나 ActiveScenario가 손상된 경우에는 해당 대상
+준비를 실패로 기록합니다.
+
+### 9.2 `FILE`
+
+기존 SLDV 결과 MAT 또는 일반 Dataset MAT를 검증하고 사용합니다. 두 파일 모두
+확장자가 `.mat`일 수 있으므로 `DataFileFormat`으로 명시적으로 구분합니다.
+
+```text
+SldvMode=FILE
+SldvDataFile=sldv_data/Controller_sldvdata.mat
+DataFileFormat=SLDV
+```
+
+`DataFileFormat` 열이 없는 기존 Excel은 `SLDV`로 처리하므로 동작이 바뀌지 않습니다.
+`SLDV`는 Design Verifier가 생성한 `sldvData` 구조체를 기존 흐름으로 읽고,
+TestCase parameter override도 그대로 적용합니다.
+
+일반 Dataset 입력은 다음처럼 설정합니다.
+
+```text
+SldvMode=FILE
+SldvDataFile=input_data/Controller_scenarios.mat
+DataFileFormat=MAT
+MatVariableName=
+```
+
+MAT 파일의 비어 있지 않은 scalar `Simulink.SimulationData.Dataset`만 후보입니다.
+`MatVariableName`이 비어 있으면 후보를 변수명으로 정렬해 각각 Scenario로 만들고,
+값이 있으면 정확히 일치하는 변수 하나만 사용합니다. Dataset 외 변수가 함께 있어도
+무시하지만 Dataset 후보가 없거나 지정 변수가 없거나 Dataset이 아니면 실패합니다.
+최종 Scenario 이름은 `UT_REQ_{CUTName}_{index}` 규칙을 사용하고 원래 MAT 변수명은
+manifest `OriginalNames`에 보존합니다.
+
+여러 Dataset은 입력 개수·순서·이름·자료형·차원이 모두 같아야 하며 Harness Signal
+Editor ActiveScenario와도 정확히 일치해야 합니다. 각 Scenario의 EndTime은 모든
+입력 신호의 마지막 시간 중 최댓값입니다. 시간 정보가 전혀 없으면 임의 시간을
+생성하지 않고 실패합니다. MAT Scenario는 parameter payload가 없으므로
+`ParameterCount=0`이며 `sldvsimdata`와 `st_apply_sldv_parameters`를 호출하지 않습니다.
+
+Harness의 기존 Signal Editor MAT에 `TestCase_1`, `TestCase_2`, ...처럼 여러
+Scenario가 이미 있으면 SLDV 원본 TestCase 번호와 일대일 대응해 각각의
+템플릿으로 사용합니다. 따라서 SLDV가 구동하지 않는 Harness 외부 입력도 각
+Scenario의 기존 값으로 보존됩니다. 번호 기반 대응이 불가능할 때만
+`ActiveScenario`, `InputScenario`, 유일한 Dataset 순으로 단일 템플릿을
+선택하며, 둘 이상이 모호하게 남으면 임의 선택하지 않고 실패합니다.
+
+`FILE+SLDV`와 `GENERATE` 대상은 Atomic Subsystem이어야 합니다. 기본 설정인
+`cfg.AutoConvertSldvTargetsToAtomic=true`에서는 링크가 없는
+`TreatAsAtomicUnit=off` CUT만 SLDV 준비 전에 `on`으로 바꿉니다. 라이브러리 linked
+CUT는 링크 훼손을 막기 위해 자동 변경하지 않고 `SldvLinkedCUTRequiresAtomic`으로
+중단합니다. 이 경우 원본 library block을 Atomic으로 설정하고 instance link를
+갱신해야 합니다. 일반 `FILE+MAT` Dataset은 SLDV 분석을 실행하지 않으므로 Atomic
+변환을 생략하며 `AtomicAction=NOT_REQUIRED_MAT`를 기록합니다.
+
+라이브러리 linked CUT에 연결된 Harness는 workflow 시작 시 `SyncOnOpen`으로
+보정합니다. 이는 Harness를 열 때 원본 CUT를 Harness로 가져오되, Harness 종료 시
+CUT 복사본이 원본 모델로 push되는 동작을 차단합니다. Harness 생성·clone 전후에는
+`StaticLinkStatus`와 `ReferenceBlock`을 비교하며 달라지면
+`HarnessChangedLibraryLink`으로 즉시 중단합니다.
+
+SLDV MAT에 Harness `ActiveScenario`에 없는 신규 입력이 포함되면 기본
+`cfg.IgnoreUnexpectedSldvInputs=false`에서는 준비 단계가 실패합니다. 신규 입력이
+해당 Harness 테스트에 필요하지 않음을 확인한 경우에만 이 설정을 `true`로
+변경할 수 있습니다. 이때 신규 입력은 Signal Editor Scenario에서 제외되고,
+공통 입력만 SLDV 값으로 교체됩니다. 제외 내역은 `SldvGenerationResult`의
+`IgnoredSldvInputs`, `IgnoredSldvInputCount` 열에서 확인합니다.
+
+현재 `cfg.AllowSldvSubsystemPathMismatch=true`는 같은 라이브러리 구현을 서로 다른
+모델 계층에서 사용하는 임시 호환을 위해, `FILE+SLDV` MAT에 기록된
+`ModelInformation.SubsystemPath`가 대상 CUT과 달라도 WARN만 남기고 계속합니다.
+Harness 입력 인터페이스 검증은 유지됩니다. 경로 오사용을 다시 엄격하게 차단하려면
+이 설정을 `false`로 변경합니다.
+
+### 9.3 `GENERATE`
+
+Top Model의 현재 Design Verifier 설정을 복사해 CUT에 TestGeneration을
+실행합니다. 성공한 데이터는 다음에 저장합니다.
+
+```text
+result/sldv/{No}_{CUTName}/latest_sldvdata.mat
+```
+
+### 9.4 공유 MAT 검사
+
+기본값:
+
+```matlab
+cfg.CheckSharedSignalEditorDataFile = false;
+```
+
+따라서 SLDV 준비 시 모든 Harness를 열고 닫는 공유 검사를 생략합니다. 실제로
+여러 Harness가 같은 Signal Editor MAT를 사용할 가능성이 있으면 `true`로
+바꿉니다. 공유 상태에서 검사를 끄면 `_sldv.mat` Scenario가 충돌할 수 있습니다.
+
+## 10. 테스트 실행과 expected-value 정책
+
+`cfg.RunGeneratedTests=false`이면 준비와 Test Manager 구성까지만 수행합니다.
+
+`ExpectedUpdateMode`:
+
+| 값 | 동작 |
+| --- | --- |
+| `OFF` | 실패해도 expected 값을 변경하지 않음 |
+| `APPLY` | 실패 결과의 실제 값을 verify RHS에 적용 |
+| `DEFAULT` | `cfg.ExpectedUpdateMode` 사용 |
+
+기대값 변경 의도가 없다면 Excel 행과 전역 기본값을 `OFF`로 설정합니다.
+
+`cfg.VerifyHarnessOutportsOnly=true`이고 실제 실행 Harness/standalone 모델에
+사용 가능한 최상위 출력 신호가 0개이면 verify할 대상도 없습니다. 이 경우 빈
+verify Action은 정상 구성이며 verify timing 검사와 기대값 갱신은
+`SKIP_NO_VERIFY_OUTPUT`으로 기록하고 계속합니다. 출력이 하나라도 있는데 verify
+결과가 없거나 `Untested`인 경우는 계속 실패입니다. 모든 Assessment 입력을
+검증하는 `VerifyHarnessOutportsOnly=false`에는 이 예외를 적용하지 않습니다.
+
+## 11. 종합 검증
+
+### 11.1 `st_verify_all`
+
+빠른 상태 확인:
+
+```matlab
+summary = st_verify_all( ...
+    'Profile', 'QUICK', ...
+    'Target', 'CURRENT', ...
+    'FailOnNonPass', false);
+```
+
+실제 모델 격리 실행:
+
+```matlab
+summary = st_verify_all( ...
+    'Profile', 'RUNTIME', ...
+    'Target', 'CURRENT', ...
+    'KeepWorkspace', 'ON_FAILURE', ...
+    'FailOnNonPass', false);
+```
+
+최종 fixture와 실제 모델 인증:
+
+```matlab
+summary = st_verify_all( ...
+    'Profile', 'CERTIFY', ...
+    'Target', 'BOTH', ...
+    'ManualEvidence', 'manual-evidence.json', ...
+    'KeepWorkspace', 'ON_FAILURE', ...
+    'FailOnNonPass', false);
+```
+
+결과는 `result/verification/runs/`에 저장되며 `latest.json`이 최신 실행을
+가리킵니다. 상세 판정은 `docs/user-manual.md`와 `docs/verification.md`를
+참조합니다.
+
+## 12. 테스트 자산 관리와 재실행 번들 내보내기
+
+### 12.1 `st_export_test_asset_bundle`
+
+선택한 Test Manager 결과, 그 결과의 Test Case와 매핑되는 standalone
+Harness, Signal Editor·SLDV 입력, 관리 Excel과 Coverage 결과를 함께
+복사합니다. 전체 모델 dependency, Toolbox 분석과 전체 파일 SHA-256은
+생략하며 ZIP도 기본적으로 만들지 않습니다.
+
+```matlab
+info = st_export_test_asset_bundle('SelectResult', true);
+```
+
+선택창은 현재 Test Manager ResultSet과 저장된 toolkit Run을 한 목록에
+표시합니다. 각 항목의 결과 이름, 상태, 실행 또는 수정 시간을 확인하고 하나를
+선택할 수 있으므로 Run ID를 직접 입력할 필요가 없습니다.
+
+스크립트에서 ResultSet을 직접 지정:
+
+```matlab
+rs = sltest.testmanager.getResultSets;
+info = st_export_test_asset_bundle('ResultSet', rs(3));
+```
+
+기존 toolkit run을 선택:
+
+```matlab
+info = st_export_test_asset_bundle( ...
+    'RunId', '20260901_120000_example');
+```
+
+출력: `result/exports/assets/{timestamp}_{id}/`. 원본 모델에는 내부 Harness가
+그대로 남으며, 번들의 `harnesses/`에는 임시 모델 사본에서 분리한 독립 Harness
+`.slx`가 생성됩니다. Test Case 매핑은 Enabled와 관계없이 선택 결과를
+기준으로 합니다.
+격리 사본은 내부 Harness owner 경로가 바뀌지 않도록 원본과 같은 모델명을
+사용합니다. 따라서 export 단계에서 원본 모델과 열려 있던 Harness를 잠시
+닫고, standalone Harness 생성이 끝나거나 실패하면 원본 세션을 복원합니다.
+ResultSet을 직접 선택한 경우 Excel Coverage 요약은 `OVERALL`과 `CUT` 수준만
+생성합니다. 기본 `CoverageReportMode='SUMMARY'`는 Coverage 없는 공식 PDF와
+경량 `CoverageSummary.html`을 만들며, 전체 Coverage 원본은 선택 결과 MLDATX에
+보존합니다. 또한 `coverage/data/`에 CVT를 저장하고 적용된 CVF 원본을 유지한
+채 `coverage/filters/`에도 복사합니다. 공식 PDF Coverage와 `cvhtml` 상세
+보고서가 꼭 필요할 때만
+`CoverageReportMode='FULL'`을 지정하십시오. Coverage 객체 메타데이터가 CUT와
+정확히 매핑되지 않으면 전체 객체를 교차 조회하지 않고 해당 행과 번들을
+`PARTIAL`로 기록합니다. 명령창에는 결과 계층, MLDATX, CUT Coverage, PDF,
+HTML, Excel의 6단계 진행 상태와 경과 시간이 출력됩니다.
+
+PER_CUT 실행은 `SUMMARY`에서도 각 `initial/coverage/detail/` 및 실제 재실행이
+있는 경우 `final/coverage/detail/`에 독립 Coverage Detail HTML과 동반 리소스를
+생성합니다. Test Manager의 원본 ResultSet과 원본 CVF는 유지됩니다. 다른
+위치로 전달할 때는 해당 `initial/` 또는 `final/` 폴더 전체를 복사합니다.
+`info.ResultSource`는 `ResultSet` 또는 `RunId`이며, `info.Status`가
+`PARTIAL`이면 `info.ArtifactFailures`와 manifest의 `ResultArtifacts`에서
+누락된 보고서 또는 Coverage를 확인할 수 있습니다.
+
+필요할 때만 ZIP 생성:
+
+```matlab
+info = st_export_test_asset_bundle('CreateArchive', true);
+```
+
+### 12.2 `st_export_test_bundle`
+
+저장된 모델, Test File, 관리 Excel, dependency와 입력을 독립 실행 번들로
+복사합니다. 원본 모델과 Test File은 저장된 상태여야 합니다.
+
+```matlab
+info = st_export_test_bundle();
+```
+
+ZIP 없이 폴더만 생성:
+
+```matlab
+info = st_export_test_bundle('CreateArchive', false);
+```
+
+Harness를 독립 모델로 내보내 재실행하는 v2 번들:
+
+```matlab
+info = st_export_test_bundle( ...
+    'ExecutionModelMode', 'STANDALONE_HARNESS');
+```
+
+`STANDALONE_HARNESS`는 `Profile='REPRODUCIBLE'`에서만 사용할 수 있습니다.
+원본 모델의 일회용 복사본에서 대상별 standalone 모델을 만들고, 실행 작업
+사본의 Test Case만 해당 모델로 재배선합니다. 원본 모델·Harness·Test File은
+checksum과 Harness inventory를 다시 검사합니다.
+
+특정 run report를 참조 결과로 포함:
+
+```matlab
+info = st_export_test_bundle( ...
+    'RunId', '20260830_120000_example');
+```
+
+출력: `result/exports/{timestamp}_{id}/`와 선택적 ZIP. 자세한 형식은
+`docs/export-bundle.md`를 참조합니다.
+
+## 13. 진단 명령
+
+| 명령 | 용도 | 원본 변경 |
+| --- | --- | --- |
+| `st_diagnose_sldv_timing` | SLDV raw 시간과 Dataset 시간 비교 | 없음 |
+| `st_diagnose_excel_access` | Python/xlwings Excel 접근 경로 비교 | 기본 읽기 전용 |
+| `st_diagnose_assessment_port_mapping` | Harness 출력과 Assessment 입력 물리 연결 확인 | 없음 |
+| `st_diagnose_assessment_port_mapping_range` | 여러 행의 mapping 범위 진단 | 없음 |
+| `st_show_assessment_mapping_order` | Assessment symbol/port 순서 표시 | 없음 |
+| `st_show_assessment_scenario_output_order` | Scenario 입력과 출력 순서 표시 | 없음 |
+
+Excel 진단의 `writeProbe=true`도 원본 workbook을 저장하지 않지만 disposable
+workbook을 같은 폴더에 생성해 쓰기 가능 여부를 확인합니다.
+
+## 14. 결과 파일 구조
+
+```text
+result/
+├── reports/          # 단계별 INI
+├── sldv/             # generated latest data와 manifest
+├── state/            # 증분 workflow checkpoint
+├── runs/             # Test 실행 통합 보고서
+├── exports/          # 테스트 자산, 재실행 번들과 ZIP
+├── verification/     # QUICK/RUNTIME/CERTIFY 결과
+├── latest.json       # 최신 normal run 포인터
+└── TestSummary.xlsx  # 최신 normal run 요약
+```
+
+`result/`는 생성물 영역이지만 인증 증거, 전달 번들 또는 재현에 필요한 run을
+삭제하기 전에 별도로 보관해야 합니다.
+
+## 15. 결과 정리
+
+### 15.1 `st_cleanup_results`
+
+인자 없이 실행하면 아무것도 삭제하지 않고 계획만 출력합니다.
+
+```matlab
+plan = st_cleanup_results();
+```
+
+Scope:
+
+| Scope | 정리 대상 |
+| --- | --- |
+| `REPORTS` | `result/reports` |
+| `SLDV` | `result/sldv`; 삭제 후 SLDV 준비 필요 |
+| `STATE` | `result/state`; 다음 AUTO에서 준비 단계 재평가 |
+| `RUNS` | `result/runs`, `latest.json`, `TestSummary.xlsx` |
+| `PER_CUT_RUNS` | `result/per_cut_runs`, `per_cut_latest.json` |
+| `EXPORTS` | `result/exports` |
+| `VERIFICATION` | `result/verification` |
+| `FILTERS` | `result/coverage_filters`; 다음 실행에서 자동 재생성 |
+| `ALL` | 위의 모든 알려진 생성물 |
+
+선택 범위 dry-run:
+
+```matlab
+plan = st_cleanup_results( ...
+    'Scope', {'REPORTS','STATE'});
+```
+
+계획을 확인한 뒤 실제 적용:
+
+```matlab
+plan = st_cleanup_results( ...
+    'Scope', {'REPORTS','STATE'}, ...
+    'Apply', true);
+```
+
+전체 생성물 적용:
+
+```matlab
+plan = st_cleanup_results( ...
+    'Scope', 'ALL', ...
+    'Apply', true);
+```
+
+안전 경계:
+
+- `result/` 자체는 삭제하지 않습니다.
+- 알려진 하위 경로만 canonical path 검증 후 삭제합니다.
+- 모델, Excel, `runtime_target.mat`, `.mldatx`는 선택하지 않습니다.
+- `result/` 밖에 있는 사용자 제공 SLDV MAT는 선택하지 않습니다.
+- `Apply=true`의 폴더 삭제는 재귀적이며 복구되지 않을 수 있습니다.
+
+## 16. 자주 사용하는 운영 조합
+
+### 기존 Harness + 기존 SLDV MAT + TC까지만
+
+```text
+Targets.SldvMode=FILE
+Targets.SldvDataFile=<Excel 기준 MAT 상대경로>
+Targets.DataFileFormat=SLDV
+cfg.RunGeneratedTests=false
+cfg.OverwriteTestFile=false
+```
+
+```matlab
+st_setup
+st_select_target_model
+st_run_after_harness
+```
+
+### 준비 상태를 무시하고 SLDV부터 재적용
+
+```matlab
+st_run_after_harness( ...
+    'PreparationMode', 'FORCE', ...
+    'FromStage', 'SLDV');
+```
+
+### checkpoint만 제거하고 다시 판단
+
+```matlab
+st_cleanup_results('Scope', 'STATE')
+st_cleanup_results('Scope', 'STATE', 'Apply', true)
+st_run_after_harness
+```
+
+### 실행 후 빠른 검증
+
+```matlab
+summary = st_verify_all( ...
+    'Profile', 'QUICK', ...
+    'Target', 'CURRENT', ...
+    'FailOnNonPass', false);
+```
+
+## 17. 실패 시 확인 순서
+
+1. MATLAB Command Window의 마지막 `[단계/대상] FAIL` 메시지
+2. `result/reports/WorkflowPlanResult.ini`
+3. 해당 단계 INI 결과의 `Status`, `Message`
+4. `PreparationMode=FORCE`가 필요한지 판단
+5. FILE이면 형식, Dataset 변수 선택, 이름·자료형·차원과 Harness 일치 여부 확인
+6. Test Manager 단계면 Scenario/Iteration 이름과 기존 TC 중복 확인
+7. runtime 인증은 `VerificationSummary.xlsx`의 required FAIL/BLOCKED 확인
+
+`Ctrl+C`로 중단했으면 열린 Harness와 모델의 Dirty 상태를 확인하고 저장 여부를
+판단한 뒤 다시 실행합니다. 증분 checkpoint는 성공한 단계만 재사용합니다.
+
+## Template Harness clone
+
+Targets의 `TestPreparationSource=HARNESS_CLONE`, `SourceCUTPath`(원본 모델을 포함한 전체 경로),
+`SourceHarnessName`으로 정상 구성된 Harness를 지정한다. 대상 Harness 이름은 기존 열을
+그대로 사용한다. `cfg.OverwriteHarness=false`는 기존 Harness를 건너뛰고, true는 복구용
+clone을 저장한 뒤 교체한다. 입력·Assessment 자동화는 기존 함수를 재사용한다.
+자세한 설정, 복구 및 검증 절차는 [Template Harness clone](harness-template-clone.md)을 참고한다.
