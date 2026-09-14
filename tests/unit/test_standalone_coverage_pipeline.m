@@ -179,18 +179,20 @@ rewireIsolationAt = rewireIsolationAt( ...
 verifyLessThan(testCase, rewireIsolationAt(1), rewireCleanupAt(1));
 end
 
-function testDecisionWithoutObjectivesUsesValidZeroDenominatorMetric(testCase)
+function testCoverageWithoutObjectivesUsesValidZeroDenominatorMetric(testCase)
 metrics = source('reporting', 'st_collect_final_cut_coverage_metrics.m');
+summary = source('reporting', 'st_collect_coverage_summary.m');
 prepare = source('execution', 'st_prepare_standalone_bundle_execution.m');
-verifyTrue(testCase, contains(metrics, "if strcmpi(name, 'Decision')"));
-verifyTrue(testCase, contains(metrics, 'zero_decision_metric'));
-verifyTrue(testCase, contains(metrics, ...
-    "'No Decision coverage objectives matched this CUT.'"));
-verifyTrue(testCase, contains(metrics, 'value.Total = 0'));
+verifyTrue(testCase, contains(summary, 'if isempty(values)'));
+verifyTrue(testCase, contains(summary, ...
+    'st_coverage_percentage(0, 0)'));
+verifyTrue(testCase, contains(summary, ...
+    'coverage has no objectives for this CUT'));
+verifyFalse(testCase, contains(metrics, 'zero_decision_metric'));
 verifyTrue(testCase, contains(prepare, ...
     'StandaloneCoverageMetricSettingsReadbackFailed'));
 verifyTrue(testCase, contains(prepare, "contains(metricSettings, 'd')"));
-verifyTrue(testCase, contains(prepare, "contains(metricSettings, 'e')"));
+verifyFalse(testCase, contains(prepare, "contains(metricSettings, 'e')"));
 end
 
 function testSummaryUsesExactSevenColumns(testCase)

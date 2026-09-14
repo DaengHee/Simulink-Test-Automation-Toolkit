@@ -104,9 +104,11 @@ metricColumns = {'CUTName', 'MetricSource', 'MetricSourceStatus', ...
 disp(T(:, metricColumns));
 ```
 
-정상값은 `MetricSourceStatus='PROVISIONAL'`, 각 `MetricStatus='OK'`다. `MISSING`,
-`INCOMPLETE`, `AMBIGUOUS`, `NaN`, 혹은 Covered가 Total보다 큰 값이 보이면 표 전체를
-공유한다.
+정상값은 `MetricSourceStatus='PROVISIONAL'`, 각 `MetricStatus='OK'`다. CVF가 해당
+CUT의 objective를 모두 제외했거나 원래 objective가 없으면 `Covered=0`, `Total=0`,
+`Percentage=NaN`, `PercentageText='N/A'`도 정상이다. 반대로 `MISSING`, `INCOMPLETE`,
+`AMBIGUOUS`, Total이 0이 아닌데 `NaN`, 혹은 Covered가 Total보다 큰 값이 보이면 표
+전체를 공유한다.
 
 ## 4. 산출물 확인
 

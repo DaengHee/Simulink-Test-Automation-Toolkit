@@ -364,6 +364,12 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   `st_check_standalone_coverage = 1111111111`을 확인해야 한다. PACKAGE 예외는
   `PackageFailure.Stack`에 최초 호출 파일·라인을 보존한다. 실행 명령은
   `docs/manual/standalone-coverage-runtime.md`에 있다.
+- R2025b Test Manager CoverageSettings readback의 `MetricSettings='d'`는 Decision이
+  Block Execution을 포함하는 legacy 표기이므로 정상이다. 이 값에 `e`가 없다는 이유로
+  EXECUTE를 중단하면 안 된다. matched CUT에서 CVF가 모든 objective를 제외하면
+  Decision/Execution 모두 `0/0`, `N/A` (`Percentage=NaN`)와 `MetricStatus=OK`가
+  정상이며, unmatched coverage object와 혼동하지 않도록 summary 수집 단계에서만
+  zero-denominator row를 만든다.
 - 실제 R2025b에서 사용자가 Top Model을 열지 않았는데도 target 입력 수집 후
   `StandaloneModelStillLoadedBeforeRun`이 발생했다. export 중간 상태가 아니라
   `st_export_test_bundle` 진입 전 load 상태를 기준으로 dependency/Harness API가
