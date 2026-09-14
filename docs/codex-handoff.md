@@ -420,7 +420,12 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   오류가 재현되어, 단순 load state가 아니라 실행 때의 Coverage report context가
   모델 종료와 함께 소실되는 것으로 판단했다. 이제 PER_CUT 실행 직후 모델이 열린
   동안 공식 ZIP과 metric JSON을 임시 증거로 캡처하고, 모델 정리 후 PACKAGE는 해시와
-  대상을 검증해 최종 산출물로 승격한다. 이 수정의 R2025b 재검증은 아직 미수행이다.
+  대상을 검증해 최종 산출물로 승격한다. 실제 재실행에서 모든 CUT의
+  `PackageEvidenceStatus=OK`인데도 이전 PACKAGE 구현의 `cvhtml:ModelNotOpen`이
+  재현되어, 장기 MATLAB 세션이 디스크 갱신 전 helper를 메모리에 유지한 사실을
+  확인했다. controller는 PACKAGE 직전에 helper를 clear/rehash하고 활성 프로젝트
+  경로와 `CAPTURED_EVIDENCE_V1` 구현 표식을 검증한 뒤 호출한다. 이 cache 격리
+  수정의 R2025b 재검증은 아직 미수행이다.
 
 정적 검증: 변경·추가 MATLAB 파일 중 37개가 MISS_HIT UTF-8 검사에 통과했다.
 Signal Editor의 `import(reader)` 파서 오류는 Import 이전 기준 `7f0825e`에서도
