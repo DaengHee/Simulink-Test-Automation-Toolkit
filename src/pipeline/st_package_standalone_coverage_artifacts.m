@@ -45,6 +45,7 @@ for i = 1:numel(manifest.Targets)
             i, numel(manifest.Targets), item.CUTName);
     catch ME
         item.PackageStatus = 'FAIL';
+        item.PackageFailure = package_failure_detail(ME);
         item.Message = append_message(item.Message, ...
             sprintf('%s: %s', ME.identifier, ME.message));
         st_log(cfg, 'ERROR', ...
@@ -141,7 +142,7 @@ manifest.TestManagerFile = destination;
 manifest.TestManagerSHA256 = st_file_signature(destination).SHA256;
 end
 
-function item = package_target(item, resultObj, targetDirectory, cfg)
+function item = package_target(item, resultObj, targetDirectory, cfg) %#ok<INUSD>
 item = package_execution_inputs(item, targetDirectory, cfg);
 sourceCVF = item.ExecutionCVFPath;
 if ~isfile(sourceCVF)
@@ -153,20 +154,6 @@ finalCVF = fullfile(targetDirectory, ...
 copy_checked(sourceCVF, finalCVF);
 item.PackagedCVF = finalCVF;
 item.PackagedCVFSHA256 = st_file_signature(finalCVF).SHA256;
-
-coverageObjects = st_collect_result_coverage_objects(resultObj);
-if isempty(coverageObjects)
-    error('simtest:StandalonePipelineCoverageMissing', ...
-        'Result contains no coverage objects.');
-end
-cvtPath = fullfile(targetDirectory, ...
-    [st_export_safe_name(item.CUTName) '_CoverageResult.cvt']);
-delete_if_present(cvtPath);
-st_log(cfg, 'DEBUG', 'PACKAGE cvsave start | CUT=%s', item.CUTName);
-save_cvt(cvtPath, coverageObjects, cfg);
-st_log(cfg, 'DEBUG', 'PACKAGE cvsave complete | CUT=%s', item.CUTName);
-item.CoverageResult = cvtPath;
-item.CoverageResultSHA256 = st_file_signature(cvtPath).SHA256;
 
 item = package_captured_report_and_metrics(item, targetDirectory, cfg);
 end
@@ -193,6 +180,20 @@ try
     reportZip = char(string(evidence.ReportZip));
     require_signature(reportZip, evidence.ReportZipSHA256, ...
         'simtest:StandalonePipelinePackageReportInvalid');
+    sourceCVT = char(string(evidence.CoverageResult));
+    require_signature(sourceCVT, evidence.CoverageResultSHA256, ...
+        'simtest:StandalonePipelinePackageCoverageInvalid');
+
+    cvtPath = fullfile(targetDirectory, ...
+        [st_export_safe_name(item.CUTName) '_CoverageResult.cvt']);
+    delete_if_present(cvtPath);
+    st_log(cfg, 'INFO', ...
+        'PACKAGE captured coverage data promotion start | CUT=%s', item.CUTName);
+    copy_checked(sourceCVT, cvtPath);
+    item.CoverageResult = cvtPath;
+    item.CoverageResultSHA256 = st_file_signature(cvtPath).SHA256;
+    st_log(cfg, 'INFO', ...
+        'PACKAGE captured coverage data promotion complete | CUT=%s', item.CUTName);
 
     reportDirectory = fullfile(targetDirectory, ...
         [st_export_safe_name(item.CUTName) '_TestReport']);
@@ -230,7 +231,8 @@ catch ME
         'Cannot read package evidence %s: %s', path, ME.message);
 end
 required = {'Version','No','CUTName','TestCaseName','StandaloneModel', ...
-    'ReportZip','ReportZipSHA256','Decision','Execution', ...
+    'CoverageResult','CoverageResultSHA256','ReportZip','ReportZipSHA256', ...
+    'Decision','Execution', ...
     'MetricSource','MetricSourceStatus'};
 if ~isstruct(evidence) || ~all(isfield(evidence, required)) || ...
         double(evidence.Version) ~= 1 || ...
@@ -347,19 +349,6 @@ item.([name 'PercentageText']) = char(string(metric.PercentageText));
 item.([name 'MetricStatus']) = char(string(metric.Status));
 end
 
-function save_cvt(path, objects, cfg)
-[folder, name] = fileparts(path);
-base = fullfile(folder, name);
-arguments = [{base}; objects(:)];
-writableCleanup = st_enter_writable_coverage_directory(cfg, 'CVSAVE');
-cvsave(arguments{:});
-clear writableCleanup;
-if ~isfile(path)
-    error('simtest:StandalonePipelineCVTSaveMissing', ...
-        'cvsave did not create the expected file: %s', path);
-end
-end
-
 function ensure_report_html(reportDirectory)
 rootReport = fullfile(reportDirectory, 'report.html');
 if isfile(rootReport), return; end
@@ -442,6 +431,21 @@ end
 
 function value = append_message(existing, added)
 if isempty(existing), value = added; else, value = [existing ' | ' added]; end
+end
+
+function value = package_failure_detail(exception)
+frames = repmat(struct('Name', '', 'File', '', 'Line', 0), 0, 1);
+for i = 1:numel(exception.stack)
+    frame = exception.stack(i);
+    frames(end+1,1) = struct( ...
+        'Name', char(string(frame.name)), ...
+        'File', char(string(frame.file)), ...
+        'Line', double(frame.line)); %#ok<AGROW>
+end
+value = struct( ...
+    'Identifier', char(string(exception.identifier)), ...
+    'Message', char(string(exception.message)), ...
+    'Stack', frames);
 end
 
 function value = action_state(status, message)

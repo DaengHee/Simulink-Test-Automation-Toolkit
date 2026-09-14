@@ -357,6 +357,13 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 - 현재 PC에는 MATLAB과 MISS_HIT 실행 환경이 없어 `git diff --check`와 정적 계약
   검사만 수행할 수 있다. `tests/integration/test_standalone_coverage_pipeline_runtime.m`
   및 위 20번 R2025b/GUI 증거 전에는 main에 통합하지 않는다.
+- PACKAGE의 남은 `cvsave`는 닫힌 execution model을 참조하는 Coverage 객체를
+  직렬화하므로, 실행 model이 열린 `capture_package_evidence`로 이동했다. PACKAGE는
+  CVT/HTML/metric evidence의 SHA-256을 검증해 복사만 한다. R2025b에서는 ALL 및
+  EXECUTE→PACKAGE→SUMMARY 모두 `Package=OK`, CUT별 `report.html`/`.cvt` 생성과
+  `st_check_standalone_coverage = 1111111111`을 확인해야 한다. PACKAGE 예외는
+  `PackageFailure.Stack`에 최초 호출 파일·라인을 보존한다. 실행 명령은
+  `docs/manual/standalone-coverage-runtime.md`에 있다.
 - 실제 R2025b에서 사용자가 Top Model을 열지 않았는데도 target 입력 수집 후
   `StandaloneModelStillLoadedBeforeRun`이 발생했다. export 중간 상태가 아니라
   `st_export_test_bundle` 진입 전 load 상태를 기준으로 dependency/Harness API가
@@ -430,7 +437,9 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   `0111100111`로 B1/B6/B7만 실패했으며, 진단 중 `Bits` cell이 struct constructor에서
   펼쳐져 summary가 1x10 struct가 되는 오류를 확인했다. `Bits`를 cell wrapper로
   감싸 scalar summary를 복구했다. 남은 B1/B6/B7의 세부 원인은 추가 runtime 출력이
-  필요하다.
+  필요하다. 기존 PACKAGE catch가 identifier/message만 보존하고 stack을 버려
+  `cvhtml:ModelNotOpen`의 실제 호출 지점을 잃는 진단 결함도 확인했다. 이제 target
+  manifest에 exception stack을 직렬화하고 checker details에 첫 frame을 표시한다.
 
 정적 검증: 변경·추가 MATLAB 파일 중 37개가 MISS_HIT UTF-8 검사에 통과했다.
 Signal Editor의 `import(reader)` 파서 오류는 Import 이전 기준 `7f0825e`에서도

@@ -2,14 +2,16 @@
 
 ## Unreleased
 
-- Fixed standalone Coverage reporting after per-CUT model cleanup. Each
-  official Test Manager report and final metric snapshot is now captured while
-  its execution model is still open; PACKAGE verifies and promotes that
-  evidence without reopening a detached Coverage context. PACKAGE also clears
+- Fixed standalone Coverage packaging after per-CUT model cleanup. Each
+  official Test Manager report, CVT, and final metric snapshot is now captured
+  while its execution model is still open; PACKAGE verifies and promotes that
+  evidence without serializing detached Coverage objects. PACKAGE also clears
   a cached prior helper and verifies its active-project implementation contract
   before promotion, preventing mixed revisions in long-lived MATLAB sessions.
 - Fixed `st_check_standalone_coverage` returning a 1-by-10 struct array. Its
   ten bit values now remain one field of a scalar summary struct.
+- PACKAGE target manifests now preserve the exception identifier, message, and
+  call stack; checker details surface the first failing source location.
 - Replaced the standalone coverage `STEP*` interface with the default
   `ALL` workflow and explicit `EXECUTE`, `PACKAGE`, and `SUMMARY` actions.
   Each copied Test Case now runs once before one Result CVF registration;

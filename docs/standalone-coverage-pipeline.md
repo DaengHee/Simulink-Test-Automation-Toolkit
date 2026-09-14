@@ -37,7 +37,7 @@ st_run_standalone_coverage_pipeline( ...
 
 | Action | 역할 |
 |---|---|
-| `EXECUTE` | standalone export, Test Case 1회 실행, CVF 1회 등록, 열린 모델에서 report/metric 임시 증거 캡처 |
+| `EXECUTE` | standalone export, Test Case 1회 실행, CVF 1회 등록, 열린 모델에서 report/metric/CVT 임시 증거 캡처 |
 | `PACKAGE` | 임시 증거를 검증해 Model/Input/CVF/CVT/HTML/Test File 패키징 |
 | `SUMMARY` | manifest scalar에서 `CoverageSummary.xlsx` 생성 |
 | `ALL` | 세 Action 연속 실행, 기본값 |
@@ -114,3 +114,7 @@ Test Manager clear 또는 파일 생성을 수행하지 않는다.
 정적 테스트만으로 runtime 완료를 주장하지 않는다. 실제 MATLAB R2025b에서
 `tests/integration/test_standalone_coverage_pipeline_runtime.m`과 multi-CUT acceptance를
 실행하고, 최종 checker 결과 `1111111111 PASS`를 확보해야 완료로 본다.
+
+실제 수동 실행과 실패 호출 위치 확인 명령은
+[`manual/standalone-coverage-runtime.md`](manual/standalone-coverage-runtime.md)에
+정리한다.

@@ -121,6 +121,10 @@ for i = 1:n
     failed = find(checks(i,:) == "0");
     if ~isempty(failed)
         messages(i) = "Failed bits: " + strjoin(bit_labels(failed), ',');
+        packageFailure = package_failure_text(targets(i));
+        if strlength(packageFailure) > 0
+            messages(i) = messages(i) + " | " + packageFailure;
+        end
     end
 end
 
@@ -740,6 +744,31 @@ function value = field_text(item, name)
 value = '';
 if isstruct(item) && isfield(item, name) && ~isempty(item.(name))
     value = char(string(item.(name)));
+end
+end
+
+function value = package_failure_text(item)
+value = "";
+if ~isstruct(item) || ~isfield(item, 'PackageFailure') || ...
+        ~isstruct(item.PackageFailure)
+    return;
+end
+failure = item.PackageFailure;
+identifier = string(field_text(failure, 'Identifier'));
+message = string(field_text(failure, 'Message'));
+if strlength(identifier) == 0 && strlength(message) == 0
+    return;
+end
+value = identifier + ": " + string(compact(message, 180));
+if ~isfield(failure, 'Stack') || isempty(failure.Stack) || ...
+        ~isstruct(failure.Stack)
+    return;
+end
+frame = failure.Stack(1);
+file = string(field_text(frame, 'File'));
+line = field_number(frame, 'Line', 0);
+if strlength(file) > 0 && line > 0
+    value = value + " @ " + file + ":" + string(line);
 end
 end
 

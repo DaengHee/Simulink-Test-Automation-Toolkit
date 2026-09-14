@@ -29,6 +29,23 @@ verifyEqual(testCase, height(details), 2);
 verifyLessThanOrEqual(testCase, numel(splitlines(string(output))), 20);
 end
 
+function testPackageFailureAppearsInDetails(testCase)
+[root, manifest] = complete_fixture(testCase, 1);
+manifest.Targets(1).PackageStatus = 'FAIL';
+manifest.Targets(1).PackageFailure = struct( ...
+    'Identifier', 'simtest:PackageStage', ...
+    'Message', 'Package diagnostics preserve this cause.', ...
+    'Stack', struct('Name', 'package_target', ...
+        'File', 'st_package_standalone_coverage_artifacts.m', 'Line', 171));
+manifest.Actions.PACKAGE.Status = 'WARN';
+manifest.Status = 'PARTIAL';
+st_write_standalone_pipeline_manifest(root, manifest);
+evalc('[~, ~, details] = st_check_standalone_coverage(''OutputRoot'', root);');
+verifyTrue(testCase, contains(details.Message(1), 'simtest:PackageStage'));
+verifyTrue(testCase, contains(details.Message(1), ...
+    'st_package_standalone_coverage_artifacts.m:171'));
+end
+
 function testRunCountFailureClearsB4(testCase)
 [root, manifest] = complete_fixture(testCase, 1);
 manifest.Targets(1).RunCount = 2;
