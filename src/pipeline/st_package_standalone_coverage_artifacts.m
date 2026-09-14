@@ -154,19 +154,18 @@ copy_checked(sourceCVF, finalCVF);
 item.PackagedCVF = finalCVF;
 item.PackagedCVFSHA256 = st_file_signature(finalCVF).SHA256;
 
+% cvsave (called while the model was still open, during EXECUTE's
+% evidence capture) already produced the .cvt this promotes below.
+% Every execution model is already closed by the time PACKAGE runs, so
+% re-deriving it here would fail with
+% cvi.ReportUtils.checkModelLoaded:ModelNotOpen. This resolution still
+% verifies the Result actually maps to exactly one Test Case with
+% coverage data, independent of that captured file.
 coverageObjects = st_collect_result_coverage_objects(resultObj);
 if isempty(coverageObjects)
     error('simtest:StandalonePipelineCoverageMissing', ...
         'Result contains no coverage objects.');
 end
-cvtPath = fullfile(targetDirectory, ...
-    [st_export_safe_name(item.CUTName) '_CoverageResult.cvt']);
-delete_if_present(cvtPath);
-st_log(cfg, 'DEBUG', 'PACKAGE cvsave start | CUT=%s', item.CUTName);
-save_cvt(cvtPath, coverageObjects, cfg);
-st_log(cfg, 'DEBUG', 'PACKAGE cvsave complete | CUT=%s', item.CUTName);
-item.CoverageResult = cvtPath;
-item.CoverageResultSHA256 = st_file_signature(cvtPath).SHA256;
 
 item = package_captured_report_and_metrics(item, targetDirectory, cfg);
 end
@@ -203,6 +202,15 @@ try
     item.TestReport = reportDirectory;
     item.ReportHTML = fullfile(reportDirectory, 'report.html');
 
+    coverageResultSource = char(string(evidence.CoverageResult));
+    require_signature(coverageResultSource, evidence.CoverageResultSHA256, ...
+        'simtest:StandalonePipelinePackageCoverageResultInvalid');
+    cvtPath = fullfile(targetDirectory, ...
+        [st_export_safe_name(item.CUTName) '_CoverageResult.cvt']);
+    copy_checked(coverageResultSource, cvtPath);
+    item.CoverageResult = cvtPath;
+    item.CoverageResultSHA256 = st_file_signature(cvtPath).SHA256;
+
     item = assign_metric(item, evidence.Decision, 'Decision');
     item = assign_metric(item, evidence.Execution, 'Execution');
     item.MetricSource = char(string(evidence.MetricSource));
@@ -230,8 +238,8 @@ catch ME
         'Cannot read package evidence %s: %s', path, ME.message);
 end
 required = {'Version','No','CUTName','TestCaseName','StandaloneModel', ...
-    'ReportZip','ReportZipSHA256','Decision','Execution', ...
-    'MetricSource','MetricSourceStatus'};
+    'ReportZip','ReportZipSHA256','CoverageResult','CoverageResultSHA256', ...
+    'Decision','Execution','MetricSource','MetricSourceStatus'};
 if ~isstruct(evidence) || ~all(isfield(evidence, required)) || ...
         double(evidence.Version) ~= 1 || ...
         double(evidence.No) ~= double(item.No) || ...
@@ -347,18 +355,6 @@ item.([name 'PercentageText']) = char(string(metric.PercentageText));
 item.([name 'MetricStatus']) = char(string(metric.Status));
 end
 
-function save_cvt(path, objects, cfg)
-[folder, name] = fileparts(path);
-base = fullfile(folder, name);
-arguments = [{base}; objects(:)];
-writableCleanup = st_enter_writable_coverage_directory(cfg, 'CVSAVE');
-cvsave(arguments{:});
-clear writableCleanup;
-if ~isfile(path)
-    error('simtest:StandalonePipelineCVTSaveMissing', ...
-        'cvsave did not create the expected file: %s', path);
-end
-end
 
 function ensure_report_html(reportDirectory)
 rootReport = fullfile(reportDirectory, 'report.html');

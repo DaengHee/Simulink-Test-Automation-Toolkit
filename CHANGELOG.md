@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed standalone Coverage PACKAGE failing with
+  `cvi.ReportUtils.checkModelLoaded:ModelNotOpen` (via `cvsave`) on every
+  target. The captured-evidence report/metric design already avoided
+  reopening a closed model for the HTML report, but PACKAGE still called
+  `cvsave` to produce the `.cvt` after every execution model was already
+  closed. The `.cvt` is now also captured during EXECUTE while its model
+  is open, and PACKAGE only copies and verifies that captured file.
 - Fixed standalone Harness export re-triggering
   `Simulink:LoadSave:PartAlreadyWritten` on a Harness's ModelWorkspace part.
   `sltest.harness.export` dirties the copied top model as a side effect;

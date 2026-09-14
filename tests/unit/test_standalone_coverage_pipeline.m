@@ -100,7 +100,13 @@ verifyFalse(testCase, contains(package, "'ReadOnly', true"));
 verifyFalse(testCase, contains(package, 'FilteredResults.mldatx'));
 verifyFalse(testCase, contains(package, 'coverage-metrics.mat'));
 verifyFalse(testCase, contains(package, 'cvhtml('));
-verifyTrue(testCase, contains(package, 'cvsave(arguments{:})'));
+% cvsave requires its source model open, and every execution model is
+% already closed by the time PACKAGE runs -- the .cvt must be produced
+% during EXECUTE's evidence capture (while the model is open) instead,
+% and only promoted (copied) here.
+verifyFalse(testCase, contains(package, 'cvsave(arguments{:})'));
+verifyTrue(testCase, contains(package, 'st_collect_result_coverage_objects(resultObj)'));
+verifyTrue(testCase, contains(perCut, 'st_save_coverage_result(coverageResultFile'));
 verifyEqual(testCase, numel(regexp(package, ...
     'sltest\.testmanager\.report\(', 'match')), 0);
 verifyEqual(testCase, numel(regexp(perCut, ...
@@ -123,15 +129,20 @@ package = source('pipeline', ...
 perCut = source('execution', 'st_run_tests_per_cut.m');
 captureAt = strfind(perCut, 'capture_package_evidence(');
 reportAt = strfind(perCut, 'sltest.testmanager.report(resultObj');
+coverageResultAt = strfind(perCut, ...
+    'st_save_coverage_result(coverageResultFile');
 metricAt = strfind(perCut, ...
     'st_collect_final_cut_coverage_metrics(');
 cleanupAt = strfind(perCut, 'close_execution_model(row, cfg)');
 verifyNotEmpty(testCase, captureAt);
 verifyNotEmpty(testCase, reportAt);
+verifyNotEmpty(testCase, coverageResultAt);
 verifyNotEmpty(testCase, metricAt);
 verifyNotEmpty(testCase, cleanupAt);
 verifyLessThan(testCase, captureAt(1), cleanupAt(1));
-verifyLessThan(testCase, reportAt(1), metricAt(1));
+verifyLessThan(testCase, reportAt(1), coverageResultAt(1));
+verifyLessThan(testCase, coverageResultAt(1), metricAt(1));
+verifyLessThan(testCase, metricAt(1), cleanupAt(1));
 verifyTrue(testCase, contains(perCut, ...
     'StandalonePackageEvidenceModelNotOpen'));
 verifyTrue(testCase, contains(perCut, ...
@@ -148,6 +159,8 @@ verifyTrue(testCase, contains(package, ...
     'package_captured_report_and_metrics'));
 verifyTrue(testCase, contains(package, ...
     'require_signature(reportZip, evidence.ReportZipSHA256'));
+verifyTrue(testCase, contains(package, ...
+    'require_signature(coverageResultSource, evidence.CoverageResultSHA256'));
 verifyTrue(testCase, contains(package, ...
     'assign_metric(item, evidence.Decision'));
 rewireAt = strfind(package, 'function item = rewire_packaged_input');
