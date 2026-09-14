@@ -120,7 +120,23 @@ for i = 1:height(targets)
     folderCleanup = onCleanup(@() cd(previousFolder)); %#ok<NASGU>
     cd(outputFolder);
     try
-        save_system(temporaryModel);
+        % sltest.harness.export dirties the copied top model as a side
+        % effect. Re-saving that unchanged content on a later iteration --
+        % byte-identical to what save_system already wrote -- eventually
+        % fails with Simulink:LoadSave:PartAlreadyWritten on a Harness's
+        % ModelWorkspace part, reproducible even right after a full MATLAB
+        % restart. Nothing in this loop needs that dirtied in-memory state
+        % kept, so discard it by reloading the on-disk copy.
+        if strcmp(get_param(temporaryModel, 'Dirty'), 'on')
+            close_system(temporaryModel, 0);
+            load_system(temporaryModelFile);
+            reloadedFile = char(get_param(temporaryModel, 'FileName'));
+            if ~same_path(reloadedFile, temporaryModelFile)
+                error('simtest:AssetTempModelLoadMismatch', ...
+                    ['Refusing Harness export because MATLAB reloaded a ' ...
+                     'different model file: %s'], reloadedFile);
+            end
+        end
         sltest.harness.export( ...
             sourceOwner, harnessName, 'Name', outputModel);
         if bdIsLoaded(outputModel)

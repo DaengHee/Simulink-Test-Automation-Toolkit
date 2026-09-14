@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed standalone Harness export re-triggering
+  `Simulink:LoadSave:PartAlreadyWritten` on a Harness's ModelWorkspace part.
+  `sltest.harness.export` dirties the copied top model as a side effect, and
+  re-saving that unchanged content on a later target was rejected by Simulink
+  as a duplicate write -- reproducible even right after a full MATLAB restart.
+  The dirtied in-memory state is now discarded by reloading the on-disk copy
+  instead of resaving it.
 - Fixed standalone Coverage packaging after per-CUT model cleanup. Each
   original Coverage `cvhtml` report, CVT, and final metric snapshot is now
   captured while its execution model is still open; PACKAGE verifies and
