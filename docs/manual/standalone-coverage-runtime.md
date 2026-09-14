@@ -85,7 +85,67 @@ Coverage Results의 REPORT 화살표가 여는 원본 `cvhtml` HTML ZIP, metric,
 생성된 상태다. 이후 PACKAGE는 해당 evidence를 SHA-256으로 검증해 결과 폴더로 복사만
 한다.
 
-## 3. B7 metric 실패 확인
+## 3. PACKAGE evidence 읽기 전용 실패 위치 확인
+
+`Message`에 `The current directory is read only`가 있고
+`PackageEvidenceStatus='FAIL'`이면 다음 블록을 실행한다. PACKAGE의
+`st_package_standalone_coverage_artifacts:37`은 EXECUTE 실패를 전달하는 위치일 뿐
+원래 Coverage API 호출 위치가 아니다. 아래 출력은 실패 target마다 어느 evidence까지
+생성됐는지와 `PACKAGE_EVIDENCE` event를 함께 보여 준다.
+
+```matlab
+[m, manifestPath] = st_load_standalone_pipeline_manifest( ...
+    cfg.StandaloneCoverageRootDir, info.PipelineId);
+
+perCutFile = which('st_run_tests_per_cut');
+perCutSource = fileread(perCutFile);
+fprintf('Manifest: %s\n', manifestPath);
+fprintf('PER_CUT source: %s\n', perCutFile);
+assert(contains(perCutSource, ...
+    "st_enter_writable_coverage_directory(cfg, 'CVSAVE')"), ...
+    'CVSAVE writable-directory 격리가 없는 이전 코드입니다.');
+assert(contains(perCutSource, ...
+    "st_enter_writable_coverage_directory(cfg, 'CVHTML')"), ...
+    'CVHTML writable-directory 격리가 없는 이전 코드입니다.');
+
+if isfile(m.ExecutionLog)
+    lines = splitlines(string(fileread(m.ExecutionLog)));
+    relevant = contains(lines, ...
+        ["PACKAGE_EVIDENCE", "Coverage writable directory", "read only"], ...
+        'IgnoreCase', true);
+    fprintf('\nExecution log: %s\n', m.ExecutionLog);
+    disp(lines(relevant));
+else
+    fprintf('\nExecution log is missing: %s\n', m.ExecutionLog);
+end
+
+artifactNames = { ...
+    'CoverageResult.cvt', ...
+    fullfile('CoverageReport', 'report.html'), ...
+    'CoverageReport.zip', ...
+    'evidence.json'};
+for k = 1:numel(m.Targets)
+    t = m.Targets(k);
+    if ~strcmpi(string(t.PackageEvidenceStatus), "FAIL")
+        continue;
+    end
+    evidenceDirectory = fullfile(t.PerCutTargetDirectory, 'package-evidence');
+    fprintf('\n[%03d] %s\n', k, t.CUTName);
+    fprintf('  Message: %s\n', t.Message);
+    fprintf('  Evidence directory: %s\n', evidenceDirectory);
+    for j = 1:numel(artifactNames)
+        artifactPath = fullfile(evidenceDirectory, artifactNames{j});
+        fprintf('  %-36s exists=%d\n', artifactNames{j}, ...
+            isfile(artifactPath));
+    end
+end
+```
+
+`CoverageResult.cvt=0`이면 CVSAVE 이전/도중 실패, CVT만 `1`이고 report가 `0`이면
+CVHTML 도중 실패, report와 ZIP까지 `1`이고 `evidence.json=0`이면 metric 수집 또는
+최종 evidence 직렬화 단계 실패다. 출력 전체를 공유한다.
+
+## 4. B7 metric 실패 확인
 
 checker가 `1111110111`을 반환하면 PACKAGE는 성공했고 B7만 실패한 상태다. 다음
 블록으로 Result Coverage API에서 선택한 metric source와 두 metric의 scalar 계약을
@@ -110,7 +170,7 @@ CUT의 objective를 모두 제외했거나 원래 objective가 없으면 `Covere
 `AMBIGUOUS`, Total이 0이 아닌데 `NaN`, 혹은 Covered가 Total보다 큰 값이 보이면 표
 전체를 공유한다.
 
-## 4. 산출물 확인
+## 5. 산출물 확인
 
 ```matlab
 [m, ~] = st_load_standalone_pipeline_manifest( ...

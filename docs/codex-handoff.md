@@ -370,6 +370,13 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   Decision/Execution 모두 `0/0`, `N/A` (`Percentage=NaN`)와 `MetricStatus=OK`가
   정상이며, unmatched coverage object와 혼동하지 않도록 summary 수집 단계에서만
   zero-denominator row를 만든다.
+- `e8346c6` 이후 실제 `ALL`에서 1·4번 CUT은 EXECUTE/PACKAGE가 통과했지만 2·3번
+  CUT의 package evidence 캡처가 `The current directory is read only`로 실패했다.
+  PACKAGE의 `st_package_standalone_coverage_artifacts:37`은 이미 실패한 EXECUTE
+  lifecycle을 전달한 위치다. CVSAVE와 CVHTML은 모두 writable scratch 격리가 적용된
+  상태이므로, 실패 CUT의 남은 CVT/report/ZIP/evidence 파일과 ExecutionLog event로
+  실제 실패 API를 먼저 구분해야 한다. 진단 명령은
+  `docs/manual/standalone-coverage-runtime.md` 3절에 있다.
 - 실제 R2025b에서 사용자가 Top Model을 열지 않았는데도 target 입력 수집 후
   `StandaloneModelStillLoadedBeforeRun`이 발생했다. export 중간 상태가 아니라
   `st_export_test_bundle` 진입 전 load 상태를 기준으로 dependency/Harness API가
