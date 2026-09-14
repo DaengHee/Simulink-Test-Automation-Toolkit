@@ -348,9 +348,9 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   한 번 import한다.
 - pipeline manifest와 SHA-256은 원자적으로 갱신되며 latest.json으로 재개한다.
   `PACKAGE`는 공유 Test Manager 사본, CUT별 standalone 모델·input·CVF·CVT와
-  공식 ZIP root report.html을 만들고 `SUMMARY`는 정확한 7열
-  CoverageSummary.xlsx를 원자적으로 교체한다. PDF, 별도 cvhtml,
-  TestSummary.xlsx와 coverage-metrics.mat는 만들지 않는다.
+  Test Manager Coverage Results의 REPORT 화살표가 여는 원본 `cvhtml` root
+  report.html을 만들고 `SUMMARY`는 정확한 7열 CoverageSummary.xlsx를 원자적으로
+  교체한다. PDF, TestSummary.xlsx와 coverage-metrics.mat는 만들지 않는다.
 - bundle 실행 후 copied Test File과 copied Top Model을 닫고 caller의 MATLAB path와
   현재 폴더를 복원한다. 이 상태와 외부 Harness/Input 파일 checksum도 manifest와
   one-screen checker에서 확인한다.

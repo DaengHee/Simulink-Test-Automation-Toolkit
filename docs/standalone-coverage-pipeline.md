@@ -61,7 +61,7 @@ PACKAGE로 전달하므로 export/import를 수행하지 않는다. `PACKAGE`와
 - Signal Editor Input MAT(대상에 Input이 있을 때)
 - CVF
 - CVT
-- Test Manager HTML report와 root `report.html`
+- Test Manager Coverage Results의 REPORT 화살표가 여는 원본 Coverage HTML과 root `report.html`
 - target manifest
 
 파이프라인 root에는 copied Test File, pipeline manifest, JSONL lifecycle event log,
@@ -69,7 +69,8 @@ PACKAGE로 전달하므로 export/import를 수행하지 않는다. `PACKAGE`와
 추가된다.
 
 `FilteredResults.mldatx`, `coverage-metrics.mat`, `TestSummary.xlsx`, PDF와 별도
-`cvhtml` coverage 파일은 standalone 산출물로 만들지 않는다.
+보조 Coverage HTML은 만들지 않는다. `report.html`은 CUT별 원본 `cvhtml` Coverage
+보고서 하나만 보존한다.
 
 ## CoverageSummary.xlsx
 

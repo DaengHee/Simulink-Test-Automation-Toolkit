@@ -3,9 +3,9 @@
 ## Unreleased
 
 - Fixed standalone Coverage packaging after per-CUT model cleanup. Each
-  official Test Manager report, CVT, and final metric snapshot is now captured
-  while its execution model is still open; PACKAGE verifies and promotes that
-  evidence without serializing detached Coverage objects. PACKAGE also clears
+  original Coverage `cvhtml` report, CVT, and final metric snapshot is now
+  captured while its execution model is still open; PACKAGE verifies and
+  promotes that evidence without serializing detached Coverage objects. PACKAGE also clears
   a cached prior helper and verifies its active-project implementation contract
   before promotion, preventing mixed revisions in long-lived MATLAB sessions.
 - Fixed `st_check_standalone_coverage` returning a 1-by-10 struct array. Its

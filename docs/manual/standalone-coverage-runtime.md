@@ -28,6 +28,9 @@ assert(contains(fileread(packageFile), ...
 assert(contains(fileread(perCutFile), ...
     'save_package_evidence_cvt(cvtPath, coverageObjects, cfg)'), ...
     '열린 모델에서 CVT evidence를 만드는 최신 PER_CUT 코드가 아닙니다.');
+assert(contains(fileread(perCutFile), ...
+    'cvhtml(reportHTML, coverageObjects{1}, ''-sRT=0'')'), ...
+    'Test Manager Coverage Results 원본 HTML을 만드는 최신 PER_CUT 코드가 아닙니다.');
 
 info = st_run_standalone_coverage_pipeline( ...
     'Action', 'ALL', ...
@@ -77,9 +80,10 @@ for k = 1:numel(m.Targets)
 end
 ```
 
-`PackageEvidenceStatus='OK'`이면 열린 execution standalone model에서 HTML ZIP,
-metric, CVT evidence까지 생성된 상태다. 이후 PACKAGE는 해당 evidence를 SHA-256으로
-검증해 결과 폴더로 복사만 한다.
+`PackageEvidenceStatus='OK'`이면 열린 execution standalone model에서 Test Manager
+Coverage Results의 REPORT 화살표가 여는 원본 `cvhtml` HTML ZIP, metric, CVT evidence까지
+생성된 상태다. 이후 PACKAGE는 해당 evidence를 SHA-256으로 검증해 결과 폴더로 복사만
+한다.
 
 ## 3. B7 metric 실패 확인
 
