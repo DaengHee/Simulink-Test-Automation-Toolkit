@@ -81,7 +81,30 @@ end
 metric, CVT evidence까지 생성된 상태다. 이후 PACKAGE는 해당 evidence를 SHA-256으로
 검증해 결과 폴더로 복사만 한다.
 
-## 3. 산출물 확인
+## 3. B7 metric 실패 확인
+
+checker가 `1111110111`을 반환하면 PACKAGE는 성공했고 B7만 실패한 상태다. 다음
+블록으로 Result Coverage API에서 선택한 metric source와 두 metric의 scalar 계약을
+확인한다.
+
+```matlab
+[m, ~] = st_load_standalone_pipeline_manifest( ...
+    cfg.StandaloneCoverageRootDir, info.PipelineId);
+
+T = struct2table(m.Targets);
+metricColumns = {'CUTName', 'MetricSource', 'MetricSourceStatus', ...
+    'DecisionMetricStatus', 'DecisionCovered', 'DecisionTotal', ...
+    'DecisionPercentage', 'DecisionPercentageText', ...
+    'ExecutionMetricStatus', 'ExecutionCovered', 'ExecutionTotal', ...
+    'ExecutionPercentage', 'ExecutionPercentageText'};
+disp(T(:, metricColumns));
+```
+
+정상값은 `MetricSourceStatus='PROVISIONAL'`, 각 `MetricStatus='OK'`다. `MISSING`,
+`INCOMPLETE`, `AMBIGUOUS`, `NaN`, 혹은 Covered가 Total보다 큰 값이 보이면 표 전체를
+공유한다.
+
+## 4. 산출물 확인
 
 ```matlab
 [m, ~] = st_load_standalone_pipeline_manifest( ...
