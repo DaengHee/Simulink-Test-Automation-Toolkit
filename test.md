@@ -1,38 +1,38 @@
-v2는 엑셀(TestManagement.xlsx)의 아래 4개 열이 **모든 대상(CUT)에서** 다음 값이어야 한다고 강제해요:
+`test` 브랜치를 원본 v2 최신 상태로 맞췄습니다. v2의 새 기능(빈 coverage → N/A 처리, 실패 스택 기록, 원본 Coverage HTML 패키징, Test Manager 실행기)이 다 들어왔고, v2에 없는 `PartAlreadyWritten` 수정은 그대로 유지했습니다.
 
-| 열 이름 | 요구값 | 뜻 |
-|---|---|---|
-| `CoverageFilterMode` | `ALL_CONTENT` | CUT 안의 하위 내용까지 전부 측정 대상에 포함 (직계 자식만 보는 `SUBSYSTEM`이 아니라) |
-| `CoverageBoundaryMode` | `CUT_ONLY` | CUT 경계 안에서만 측정 (형제 블록 등 바깥은 제외) — 이게 아까 SetCalParm 10개를 0으로 만든 그 설정이에요 |
-| `CoverageFilterAction` | `EXCLUDE` | 필터 규칙 걸릴 때 "제외" 처리 (사유만 적고 통과시키는 `JUSTIFY`가 아니라) |
-| `CoverageFilterRationale` | (빈 값 금지) | 왜 이렇게 설정했는지 적는 사유 텍스트 칸 |
+## 해보실 것 (순서대로)
 
-지금 No=1~6번 CUT은 이 4개 중 하나 이상이 다르게 설정돼 있어서 v2 파이프라인이 시작도 못 하고 막혔습니다.
-
-## 해보실 것
-
-현재 엑셀에 이 4개 열이 실제로 어떻게 되어있는지 전체 확인:
-
-```matlab
-cfg = st_config();
-targets = st_load_targets(false);
-T = targets(:, {'No','CUTName','CoverageFilterMode','CoverageBoundaryMode', ...
-    'CoverageFilterAction','CoverageFilterRationale'});
-disp(T)
+1. **브랜치 확인** — 반드시 `test`여야 합니다:
+```bash
+git checkout test
+git pull
 ```
 
-결과 전체를 캡처해서 보여주세요. (특히 No=1~6번이 다른 행이랑 뭐가 다른지 봐주시면 됩니다.)
+2. **MATLAB 완전 재시작** (새 파일이 여러 개 들어와서 필요해요)
 
-## CoverageFilterRationale에 뭘 써야 할지 참고용
-
-정상 작동하는 다른 행들은 이미 뭐라고 적혀있는지 확인:
-
+3. **원본 Top Model과 Test File을 저장하고 닫은 뒤**, 아래를 한 번에 복붙:
 ```matlab
-cfg = st_config();
-targets = st_load_targets(false);
-T = targets(:, {'No','CUTName','CoverageFilterRationale'});
-disp(T)
+st_setup;
+cfg = st_require_runtime_target('LoadModel', false);
+if bdIsLoaded(cfg.TopModel)
+    close_system(cfg.TopModel, 0)
+end
+info = st_run_standalone_coverage_pipeline( ...
+    'Action', 'ALL', ...
+    'ContinueOnFailure', true, ...
+    'FailOnNonPass', false);
 ```
 
-이미 적혀있는 행들의 문구 스타일을 그대로 따라서, No=1~6번에도 같은 방식으로 채우시면 됩니다.
+4. **결과 확인**:
+```matlab
+[code, summary, details] = st_check_standalone_coverage('PipelineId', info.PipelineId);
+disp(code)
+disp(summary)
+```
 
+성공 기준은 `code = '1111111111'`입니다.
+
+## 참고
+
+- 지난번 v2에서 났던 `Every pipeline target requires ALL_CONTENT + CUT_ONLY + EXCLUDE...` 오류는 **`test` 브랜치에도 똑같이 있는 검사**입니다 (v2가 새로 넣은 게 아님). 엑셀의 No=1~6번 행이 이 조건에 안 맞아서 나는 거라, 그 오류가 또 나면 엑셀을 고쳐야 합니다.
+- SetCalParm 10개(Harness25~34)는 v2의 "빈 coverage → N/A" 수정으로 통과할 수도 있어요. 이번 실행에서 확인됩니다.
