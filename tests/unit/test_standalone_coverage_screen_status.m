@@ -22,7 +22,9 @@ function testCompleteFixtureReturnsAllOnes(testCase)
 st_write_standalone_pipeline_manifest(root, manifest);
 output = evalc('[code, summary, details] = st_check_standalone_coverage(''OutputRoot'', root);');
 verifyEqual(testCase, code, '1111111111');
+verifyTrue(testCase, isscalar(summary));
 verifyEqual(testCase, summary.Status, 'PASS');
+verifyEqual(testCase, numel(summary.Bits), 10);
 verifyEqual(testCase, height(details), 2);
 verifyLessThanOrEqual(testCase, numel(splitlines(string(output))), 20);
 end
