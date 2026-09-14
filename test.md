@@ -1,12 +1,10 @@
-원인: 해당 CUT의 Test Assessment(Stateflow) Input 심볼 하나가 `Size = -1`(자동/상속)로 되어있습니다. 저희 코드는 이걸 못 읽고, **숫자로 명시된 Size**만 받습니다.
+Model Explorer 안 열어도 됩니다. Stateflow Chart 안에서 바로 하는 법:
 
-## 고치는 법
-
-1. 방금 에러 메시지에 나온 그 심볼 이름(`...DTCEnable`로 끝나는 것)을 가진 CUT의 Harness를 여세요.
-2. Test Assessment(Stateflow Chart) 열기
-3. Model Explorer(또는 Symbols 창)에서 해당 Input Data 심볼 찾기
-4. 속성 창에서 `Size`를 `-1`에서 **실제 신호 크기에 맞는 숫자**로 변경 (이름상 boolean/flag 같아서 대부분 스칼라면 `1`)
-5. 저장
+1. 이미 여신 Test Assessment(Stateflow Chart) 창에서, 왼쪽이나 위쪽에 있는 **기호(Symbols) 목록/트리**를 찾으세요. (Stateflow 창 메뉴에서 "Symbols" 또는 "Model Explorer" 버튼이 있을 거예요 — 툴바나 좌측 패널)
+2. 그 목록에서 에러 메시지에 나온 그 Input 심볼(`...DTCEnable`로 끝나는 이름) 찾아서 **더블클릭**
+3. 속성 창이 뜨면 `Size` 칸 찾기 — 지금 `-1`로 되어있을 거예요
+4. `-1`을 지우고 실제 크기 숫자로 입력 (스칼라면 `1`)
+5. 적용/OK 누르고 모델 저장
 
 ## 다시 실행
 
