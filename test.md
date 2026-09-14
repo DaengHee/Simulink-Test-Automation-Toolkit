@@ -1,15 +1,22 @@
-2단계에서 `PACKAGE` 중 `cvhtml:ModelNotOpen` 오류의 정확한 발생 지점을 코드만 봐서는 못 찾았습니다. 실제로 멈춰서 스택을 봐야 합니다. 1단계(준비)는 이미 끝났으니 다시 안 하셔도 됩니다.
+`cvhtml:ModelNotOpen` 원인 찾았습니다. PACKAGE 단계가 이미 모델이 닫힌 뒤에 `.cvt`(Coverage 결과) 파일을 새로 만들려고 해서 나는 오류였어요. 이제 그 파일도 모델이 열려있는 EXECUTE 단계에서 미리 만들어두도록 고쳤습니다.
 
-## 해보실 것 (순서대로)
+## 해보실 것
 
-1. **정확히 이 오류에서만 멈추도록 설정** (이번 1번만):
+1. **디버그 설정 해제** (지난번에 켜두신 것 끄기):
 ```matlab
 dbclear all
-dbstop if caught error Slvnv:simcoverage:cvhtml:ModelNotOpen
 ```
-(`dbstop if caught error`만 쓰면 관련 없는 다른 캐치 오류에서도 다 멈추니, 반드시 위처럼 오류 ID를 붙여주세요.)
 
-2. **모델 닫기** (1.5단계, 2단계 실행 전 필수):
+2. `git pull` 로 방금 올라간 수정 받기
+
+3. MATLAB 완전 재시작
+
+4. 처음부터 순서대로 다시:
+```matlab
+st_setup
+st_run_from_harness('PreparationMode','FORCE','ExecutionMode','PER_CUT','ExecuteTests',false)
+```
+
 ```matlab
 cfg = st_config();
 if bdIsLoaded(cfg.TopModel)
@@ -17,21 +24,15 @@ if bdIsLoaded(cfg.TopModel)
 end
 ```
 
-3. **Standalone Coverage 실행** (2단계, 34개 CUT 처리 — 시간 걸림):
 ```matlab
 info = st_run_standalone_coverage_pipeline('Action','ALL')
 ```
 
-4. **`cvhtml:ModelNotOpen`에서 멈추면**:
-   - Command Window에 아래 입력해서 나온 결과를 캡처해서 보여주세요:
-     ```matlab
-     dbstack
-     ```
-   - 확인 후 계속 진행하려면:
-     ```matlab
-     dbcontinue
-     ```
-   - 다 끝나고 나서(또는 그만 멈추게 하려면):
-     ```matlab
-     dbclear all
-     ```
+5. 다 끝나면 결과 확인:
+```matlab
+[code, summary] = st_check_standalone_coverage('PipelineId', info.PipelineId);
+disp(code)
+disp(info.Status)
+```
+
+`info.Status`가 `'OK'`가 아니거나 `code`에 `0`이 섞여 있으면 캡처해서 보여주세요.
