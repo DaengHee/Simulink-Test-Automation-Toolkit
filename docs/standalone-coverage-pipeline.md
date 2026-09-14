@@ -93,6 +93,10 @@ coverage API와 standalone CUT path의 단일 일치를 요구한다. 둘 이상
 CUT은 `decisioninfo`/`executioninfo`의 빈 결과를 유효한 `0/0`, `N/A` metric으로
 기록한다.
 
+원본 Coverage HTML은 긴 execution target 경로에 직접 생성하지 않는다. Windows의
+legacy path 경계를 피하도록 짧은 writable scratch에서 report tree와 ZIP을 완성한 뒤
+ZIP만 package evidence 경로로 승격한다.
+
 ## 한 화면 검사 비트
 
 | 비트 | 검사 |

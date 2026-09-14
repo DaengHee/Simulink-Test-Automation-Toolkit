@@ -740,12 +740,10 @@ evidenceDirectory = fullfile(targetDirectory, 'package-evidence');
 if ~isfolder(evidenceDirectory)
     mkdir(evidenceDirectory);
 end
-coverageReportDirectory = fullfile(evidenceDirectory, 'CoverageReport');
 reportZip = fullfile(evidenceDirectory, 'CoverageReport.zip');
 cvtPath = fullfile(evidenceDirectory, 'CoverageResult.cvt');
 evidencePath = fullfile(evidenceDirectory, 'evidence.json');
 delete_if_present(reportZip);
-delete_folder_if_present(coverageReportDirectory);
 delete_if_present(cvtPath);
 delete_if_present(evidencePath);
 st_log(cfg, 'INFO', ...
@@ -782,8 +780,7 @@ try
             ['Execution model changed or closed after coverage data capture. ' ...
              'Expected=%s'], modelFile);
     end
-    capture_package_coverage_report(coverageReportDirectory, reportZip, ...
-        coverageObjects, row, cfg);
+    capture_package_coverage_report(reportZip, coverageObjects, row, cfg);
     if ~bdIsLoaded(modelName) || ...
             ~same_path(get_param(modelName, 'FileName'), modelFile)
         error('simtest:StandalonePackageEvidenceModelLost', ...
@@ -834,34 +831,47 @@ end
 end
 
 function capture_package_coverage_report( ...
-        reportDirectory, reportZip, coverageObjects, row, cfg)
+        reportZip, coverageObjects, row, cfg)
 if numel(coverageObjects) ~= 1
     error('simtest:StandalonePackageEvidenceCoverageReportAmbiguous', ...
         ['Expected exactly one final Coverage object for the original ' ...
          'Coverage report of %s, found %d.'], ...
         char(string(row.CUTName)), numel(coverageObjects));
 end
+writableCleanup = st_enter_writable_coverage_directory(cfg, 'CVHTML');
+scratchDirectory = pwd;
+reportDirectory = fullfile(scratchDirectory, 'CoverageReport');
 mkdir(reportDirectory);
 reportHTML = fullfile(reportDirectory, 'report.html');
 st_log(cfg, 'INFO', ...
-    'Standalone original Coverage report capture start | CUT=%s | File=%s', ...
-    char(string(row.CUTName)), reportHTML);
-writableCleanup = st_enter_writable_coverage_directory(cfg, 'CVHTML');
+    ['Standalone original Coverage report capture start | CUT=%s | ' ...
+     'Scratch=%s | Destination=%s'], ...
+    char(string(row.CUTName)), reportHTML, reportZip);
 report = cvhtml(reportHTML, coverageObjects{1}, '-sRT=0');
-clear writableCleanup;
 if isstruct(report) && isfield(report, 'fileName') && isfield(report, 'path')
     reportHTML = fullfile(char(report(1).path), char(report(1).fileName));
 end
 ensure_evidence_report_html(reportDirectory, reportHTML);
-zip(reportZip, {'*'}, reportDirectory);
+scratchZip = fullfile(scratchDirectory, 'CoverageReport.zip');
+zip(scratchZip, {'*'}, reportDirectory);
+if ~isfile(scratchZip)
+    error('simtest:StandalonePackageEvidenceCoverageReportMissing', ...
+        'cvhtml did not create the scratch Coverage ZIP: %s', scratchZip);
+end
+[copied, copyMessage] = copyfile(scratchZip, reportZip, 'f');
+if ~copied
+    error('simtest:StandalonePackageEvidenceCoverageReportCopyFailed', ...
+        'Cannot promote the scratch Coverage ZIP to %s: %s', ...
+        reportZip, copyMessage);
+end
+clear writableCleanup;
 if ~isfile(reportZip)
     error('simtest:StandalonePackageEvidenceCoverageReportMissing', ...
-        'cvhtml did not create the package evidence ZIP: %s', reportZip);
+        'The promoted package evidence ZIP is missing: %s', reportZip);
 end
 st_log(cfg, 'INFO', ...
     ['Standalone original Coverage report capture complete | CUT=%s | ' ...
-     'File=%s | ZIP=%s'], ...
-    char(string(row.CUTName)), reportHTML, reportZip);
+     'ZIP=%s'], char(string(row.CUTName)), reportZip);
 end
 
 function ensure_evidence_report_html(reportDirectory, generatedHTML)
@@ -1094,12 +1104,6 @@ end
 function delete_if_present(path)
 if isfile(path)
     delete(path);
-end
-end
-
-function delete_folder_if_present(path)
-if isfolder(path)
-    rmdir(path, 's');
 end
 end
 

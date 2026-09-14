@@ -31,6 +31,9 @@ assert(contains(fileread(perCutFile), ...
 assert(contains(fileread(perCutFile), ...
     'cvhtml(reportHTML, coverageObjects{1}, ''-sRT=0'')'), ...
     'Test Manager Coverage Results 원본 HTML을 만드는 최신 PER_CUT 코드가 아닙니다.');
+assert(contains(fileread(perCutFile), ...
+    'copyfile(scratchZip, reportZip, ''f'')'), ...
+    '긴 CUT 경로를 피하는 Coverage report scratch 승격 코드가 없습니다.');
 
 info = st_run_standalone_coverage_pipeline( ...
     'Action', 'ALL', ...
@@ -141,9 +144,11 @@ for k = 1:numel(m.Targets)
 end
 ```
 
-`CoverageResult.cvt=0`이면 CVSAVE 이전/도중 실패, CVT만 `1`이고 report가 `0`이면
-CVHTML 도중 실패, report와 ZIP까지 `1`이고 `evidence.json=0`이면 metric 수집 또는
-최종 evidence 직렬화 단계 실패다. 출력 전체를 공유한다.
+`CoverageResult.cvt=0`이면 CVSAVE 이전/도중 실패, CVT가 `1`이고 ZIP이 `0`이면
+CVHTML 또는 scratch ZIP 승격 도중 실패, ZIP까지 `1`이고 `evidence.json=0`이면 metric
+수집 또는 최종 evidence 직렬화 단계 실패다. 최신 구현의 report tree는 짧은 scratch
+안에서만 생성되고 정리되므로 `CoverageReport\report.html`이 evidence 폴더에 남지 않는
+것이 정상이다. 출력 전체를 공유한다.
 
 ## 4. B7 metric 실패 확인
 

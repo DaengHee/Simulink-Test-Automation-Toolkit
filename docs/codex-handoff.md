@@ -377,6 +377,12 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   상태이므로, 실패 CUT의 남은 CVT/report/ZIP/evidence 파일과 ExecutionLog event로
   실제 실패 API를 먼저 구분해야 한다. 진단 명령은
   `docs/manual/standalone-coverage-runtime.md` 3절에 있다.
+- 진단 결과 실패 CUT 모두 `CoverageResult.cvt`는 있고 Coverage report/ZIP은 없어
+  `cvhtml` 실패로 확정됐다. 실패한 두 report.html 절대 경로는 262자, 통과 target은
+  235·257·259자로 Windows legacy 260자 경계와 일치했다. 기존 격리는 MATLAB `pwd`만
+  짧게 바꾸고 `cvhtml`에는 긴 절대 출력 경로를 전달한 것이 결함이었다. 이제 report
+  tree와 ZIP을 writable scratch 내부에서 완성하고, 260자 미만인 단일 ZIP만 evidence
+  경로로 복사한다. R2025b 새 `ALL` 재검증이 필요하다.
 - 실제 R2025b에서 사용자가 Top Model을 열지 않았는데도 target 입력 수집 후
   `StandaloneModelStillLoadedBeforeRun`이 발생했다. export 중간 상태가 아니라
   `st_export_test_bundle` 진입 전 load 상태를 기준으로 dependency/Harness API가

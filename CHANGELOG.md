@@ -8,6 +8,10 @@
   promotes that evidence without serializing detached Coverage objects. PACKAGE also clears
   a cached prior helper and verifies its active-project implementation contract
   before promotion, preventing mixed revisions in long-lived MATLAB sessions.
+- Generate the original Coverage HTML entirely in a short writable scratch
+  directory before promoting its ZIP. This avoids the Windows legacy path
+  boundary that made long per-CUT names fail with a misleading read-only
+  current-directory error.
 - Fixed `st_check_standalone_coverage` returning a 1-by-10 struct array. Its
   ten bit values now remain one field of a scalar summary struct.
 - PACKAGE target manifests now preserve the exception identifier, message, and
