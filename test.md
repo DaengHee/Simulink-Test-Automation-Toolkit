@@ -7,7 +7,10 @@ cfg = st_config();
 if ~bdIsLoaded(cfg.TopModel)
     load_system(cfg.ModelFile);
 end
-sltest.harness.open(cfg.TopModel, 'OBC_DM_MON_CHK_SWC_Harness25');
+targetIdx = find([info.Targets.No] == 26);
+owner = info.Targets(targetIdx).CUTPath;
+disp(owner)
+sltest.harness.open(owner, 'OBC_DM_MON_CHK_SWC_Harness25');
 
 harnessModel = 'OBC_DM_MON_CHK_SWC_Harness25';
 allBlocks = find_system(harnessModel, 'FindAll', 'on', 'Type', 'block');
