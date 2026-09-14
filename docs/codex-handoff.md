@@ -416,10 +416,11 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   바로 아래 `r`로 줄였다. 이 내용은 Action 단순화 전 실패 분석 기록이다.
 - Action 단순화 후 실제 `ALL` 실행은 4개 CUT 모두 model/input/CVF/CVT까지 생성했지만
   공식 Test Manager HTML 생성에서 `Slvnv:simcoverage:cvhtml:ModelNotOpen`으로
-  실패했다. PER_CUT 정리 후 닫힌 standalone 모델을 PACKAGE가 다시 열지 않은 것이
-  원인이었다. PACKAGE는 execution workspace의 정확한 standalone 파일을 report와
-  metric 수집 동안만 열고 저장 없이 닫도록 수정했다. 동명 선로드 모델은 건드리지
-  않고 격리 오류로 중단한다. 이 수정의 R2025b 재검증은 아직 미수행이다.
+  실패했다. PACKAGE에서 execution standalone 모델을 다시 여는 첫 수정도 같은
+  오류가 재현되어, 단순 load state가 아니라 실행 때의 Coverage report context가
+  모델 종료와 함께 소실되는 것으로 판단했다. 이제 PER_CUT 실행 직후 모델이 열린
+  동안 공식 ZIP과 metric JSON을 임시 증거로 캡처하고, 모델 정리 후 PACKAGE는 해시와
+  대상을 검증해 최종 산출물로 승격한다. 이 수정의 R2025b 재검증은 아직 미수행이다.
 
 정적 검증: 변경·추가 MATLAB 파일 중 37개가 MISS_HIT UTF-8 검사에 통과했다.
 Signal Editor의 `import(reader)` 파서 오류는 Import 이전 기준 `7f0825e`에서도

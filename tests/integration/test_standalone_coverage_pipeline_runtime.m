@@ -81,6 +81,8 @@ verifyTrue(testCase, isfile(runInfo.Manifest));
 verifyEqual(testCase, string(runInfo.Targets(1).ResultFilterStatus), "OK");
 verifyEqual(testCase, runInfo.Targets(1).RunCount, 1);
 verifyEqual(testCase, runInfo.Targets(1).ResultFilterAttachCount, 1);
+verifyEqual(testCase, string(runInfo.Targets(1).PackageEvidenceStatus), "OK");
+verifyTrue(testCase, isfile(runInfo.Targets(1).PackageEvidence));
 verifyTrue(testCase, runInfo.SaveTestResult);
 verifyTrue(testCase, isfile(runInfo.ResultFile));
 
@@ -162,6 +164,12 @@ verifyEqual(testCase, manifest.PackageResultSource, 'LIVE');
 verifyEmpty(testCase, manifest.ResultFile);
 verifyFalse(testCase, manifest.CanResumePackage);
 verifyTrue(testCase, isfile(manifest.CoverageSummary));
+for i = 1:numel(manifest.Targets)
+    verifyEqual(testCase, ...
+        string(manifest.Targets(i).PackageEvidenceStatus), "OK");
+    verifyTrue(testCase, isfile(manifest.Targets(i).PackageEvidence));
+    verifyTrue(testCase, isfile(manifest.Targets(i).ReportHTML));
+end
 
 resultCountBeforeCheck = numel(sltest.testmanager.getResultSets);
 fileStateBeforeCheck = file_state(fileparts(info.Manifest));
