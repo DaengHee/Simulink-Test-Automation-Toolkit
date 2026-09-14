@@ -1,38 +1,16 @@
-`cvhtml:ModelNotOpen` 원인 찾았습니다. PACKAGE 단계가 이미 모델이 닫힌 뒤에 `.cvt`(Coverage 결과) 파일을 새로 만들려고 해서 나는 오류였어요. 이제 그 파일도 모델이 열려있는 EXECUTE 단계에서 미리 만들어두도록 고쳤습니다.
+`cvhtml:ModelNotOpen`은 해결됐습니다 (PACKAGE 자체는 이제 잘 됩니다). 지금 남은 문제는 다른 거예요: `SetCalParm_` 계열 CUT 6개가 EXECUTE(실제 테스트 실행) 단계에서 아예 실패했어요. 재시작/재실행 필요 없고, 이미 끝난 결과에서 원인만 확인하면 됩니다.
 
 ## 해보실 것
 
-1. **디버그 설정 해제** (지난번에 켜두신 것 끄기):
-```matlab
-dbclear all
-```
-
-2. `git pull` 로 방금 올라간 수정 받기
-
-3. MATLAB 완전 재시작
-
-4. 처음부터 순서대로 다시:
-```matlab
-st_setup
-st_run_from_harness('PreparationMode','FORCE','ExecutionMode','PER_CUT','ExecuteTests',false)
-```
+아래 그대로 복붙해서 실행해주세요 (지금 세션의 `info` 변수 그대로 사용):
 
 ```matlab
-cfg = st_config();
-if bdIsLoaded(cfg.TopModel)
-    close_system(cfg.TopModel, 0)
+t = info.Targets;
+for k = 1:numel(t)
+    if strcmpi(t(k).ExecutionStatus, 'FAIL')
+        fprintf('[%d] %s : %s\n', k, t(k).CUTName, t(k).Message);
+    end
 end
 ```
 
-```matlab
-info = st_run_standalone_coverage_pipeline('Action','ALL')
-```
-
-5. 다 끝나면 결과 확인:
-```matlab
-[code, summary] = st_check_standalone_coverage('PipelineId', info.PipelineId);
-disp(code)
-disp(info.Status)
-```
-
-`info.Status`가 `'OK'`가 아니거나 `code`에 `0`이 섞여 있으면 캡처해서 보여주세요.
+나온 결과를 캡처해서 보여주세요.
