@@ -22,3 +22,17 @@ disp(T)
 ```
 
 결과 전체를 캡처해서 보여주세요. (특히 No=1~6번이 다른 행이랑 뭐가 다른지 봐주시면 됩니다.)
+
+## CoverageFilterRationale에 뭘 써야 할지 참고용
+
+정상 작동하는 다른 행들은 이미 뭐라고 적혀있는지 확인:
+
+```matlab
+cfg = st_config();
+targets = st_load_targets(false);
+T = targets(:, {'No','CUTName','CoverageFilterRationale'});
+disp(T)
+```
+
+이미 적혀있는 행들의 문구 스타일을 그대로 따라서, No=1~6번에도 같은 방식으로 채우시면 됩니다.
+
