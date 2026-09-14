@@ -1,16 +1,13 @@
-지난번 수정(Dirty일 때만 저장)으로는 `PartAlreadyWritten`이 안 막혔습니다. 진짜 원인을 다시 찾아서 고쳤어요 — 하네스 내보내기가 원본 복사 모델을 dirty로 만드는데, 그걸 "다시 저장"하는 대신 "그냥 닫고 디스크에 있던 걸 다시 불러오기"로 바꿨습니다.
+2단계에서 `PACKAGE` 중 `cvhtml:ModelNotOpen` 오류의 정확한 발생 지점을 코드만 봐서는 못 찾았습니다. 실제로 멈춰서 스택을 봐야 합니다. 1단계(준비)는 이미 끝났으니 다시 안 하셔도 됩니다.
 
-## 해보실 것
+## 해보실 것 (순서대로)
 
-1. `git pull` 로 방금 올라간 수정 받기
-2. MATLAB 완전 재시작
-3. 처음부터 순서대로 다시:
-
+1. **에러 발생 시 멈추도록 설정** (이번 1번만, 새로 켠 MATLAB에서 딱 한 번):
 ```matlab
-st_setup
-st_run_from_harness('PreparationMode','FORCE','ExecutionMode','PER_CUT','ExecuteTests',false)
+dbstop if caught error
 ```
 
+2. **모델 닫기** (1.5단계, 2단계 실행 전 필수):
 ```matlab
 cfg = st_config();
 if bdIsLoaded(cfg.TopModel)
@@ -18,15 +15,21 @@ if bdIsLoaded(cfg.TopModel)
 end
 ```
 
+3. **Standalone Coverage 실행** (2단계, 34개 CUT 처리 — 시간 걸림):
 ```matlab
 info = st_run_standalone_coverage_pipeline('Action','ALL')
 ```
 
-4. 다 끝나면 전체 요약 확인:
-
-```matlab
-[code, summary] = st_check_standalone_coverage('PipelineId', info.PipelineId);
-disp(code)
-```
-
-또 같은 오류(`PartAlreadyWritten`) 나면 캡처해서 보여주세요 — 이번엔 어느 CUT/하네스에서 나는지도 같이 알려주시면 더 빨리 찾을 수 있어요.
+4. **`cvhtml:ModelNotOpen`에서 멈추면**:
+   - Command Window에 아래 입력해서 나온 결과를 캡처해서 보여주세요:
+     ```matlab
+     dbstack
+     ```
+   - 확인 후 계속 진행하려면:
+     ```matlab
+     dbcontinue
+     ```
+   - 다 끝나고 나서(또는 그만 멈추게 하려면):
+     ```matlab
+     dbclear all
+     ```
