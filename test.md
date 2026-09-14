@@ -1,9 +1,10 @@
-`PartAlreadyWritten` 오류는 MATLAB 세션에 쌓인 내부 캐시 문제로 보입니다. 오늘 같은 세션에서 시도를 많이 하셔서 그런 것 같아요.
+`PartAlreadyWritten` 오류 원인을 찾아서 코드로 고쳤습니다. (재시작 문제 아니었음 — 같은 모델을 반복 저장하다 생기는 버그였음)
 
 ## 해보실 것
 
-1. **MATLAB을 완전히 종료했다가 다시 켜주세요.** (그냥 clear 말고 진짜 재시작)
-2. 처음부터 순서대로 다시:
+1. `git pull` 로 방금 올라간 수정 받기
+2. MATLAB 완전 재시작 (혹시 몰라 한번 더)
+3. 처음부터 순서대로 다시:
 
 ```matlab
 st_setup
@@ -21,4 +22,11 @@ end
 info = st_run_standalone_coverage_pipeline('Action','ALL')
 ```
 
-재시작 후에도 같은 오류가 또 나면, 캡처해서 보여주세요 — 그땐 특정 CUT/Harness에 진짜 문제가 있는 건지 더 파봐야 합니다.
+4. 다 끝나면 전체 요약 확인:
+
+```matlab
+[code, summary] = st_check_standalone_coverage('PipelineId', info.PipelineId);
+disp(code)
+```
+
+또 같은 오류(`PartAlreadyWritten`) 나면 캡처해서 보여주세요.
