@@ -184,24 +184,30 @@ verifyTrue(testCase, contains(prepare, ...
 end
 
 
-function testTopModelResaveIsGuardedByDirtyState(testCase)
-% Repeatedly calling save_system on the same unchanged copied top model,
-% once per target across a large loop, has been observed to eventually
-% fail with Simulink:LoadSave:PartAlreadyWritten on its ModelWorkspace
-% part -- even immediately after a full MATLAB restart. save_system must
-% only run when the model actually became dirty.
+function testTopModelDirtyStateIsDiscardedNotResaved(testCase)
+% sltest.harness.export has been observed to dirty the copied top model
+% as a side effect. Re-saving that unchanged content on a later iteration
+% eventually fails with Simulink:LoadSave:PartAlreadyWritten on a
+% Harness's ModelWorkspace part -- even immediately after a full MATLAB
+% restart -- because it is identical to what save_system already wrote.
+% Discard the dirtied in-memory state by reloading the on-disk copy
+% instead of resaving it.
 root = st_project_root();
 source = fileread(fullfile(root, 'src', 'exporting', ...
     'st_export_standalone_harnesses.m'));
-verifyTrue(testCase, contains(source, ...
-    "if strcmp(get_param(temporaryModel, 'Dirty'), 'on')"));
 guardAt = strfind(source, ...
     "if strcmp(get_param(temporaryModel, 'Dirty'), 'on')");
-saveAt = strfind(source, 'save_system(temporaryModel);');
+closeAt = strfind(source, 'close_system(temporaryModel, 0);');
+loadAt = strfind(source, 'load_system(temporaryModelFile);');
 exportAt = strfind(source, 'sltest.harness.export( ...');
 verifyNotEmpty(testCase, guardAt);
-verifyNotEmpty(testCase, saveAt);
+verifyNotEmpty(testCase, closeAt);
+verifyNotEmpty(testCase, loadAt);
 verifyNotEmpty(testCase, exportAt);
-verifyLessThan(testCase, guardAt(1), saveAt(1));
-verifyLessThan(testCase, saveAt(1), exportAt(1));
+verifyLessThan(testCase, guardAt(1), closeAt(1));
+verifyLessThan(testCase, closeAt(1), loadAt(1));
+verifyLessThan(testCase, loadAt(1), exportAt(1));
+verifyFalse(testCase, contains(source, 'save_system(temporaryModel);'));
+verifyTrue(testCase, contains(source, ...
+    "'Refusing Harness export because MATLAB reloaded a '"));
 end
