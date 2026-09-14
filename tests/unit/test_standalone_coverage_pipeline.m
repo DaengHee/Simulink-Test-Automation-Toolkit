@@ -88,6 +88,46 @@ verifyTrue(testCase, contains(summary, ...
     "require_not_started(manifest, 'SUMMARY')"));
 end
 
+function testPackageLoadsExecutionModelForReportAndMetrics(testCase)
+package = source('pipeline', ...
+    'st_package_standalone_coverage_artifacts.m');
+scopeAt = strfind(package, ...
+    'function item = package_official_report_and_metrics');
+loadAt = strfind(package, 'load_system(modelFile)');
+readbackAt = strfind(package, ...
+    "get_param(modelName, 'FileName')");
+reportAt = strfind(package, 'sltest.testmanager.report(resultObj');
+metricAt = strfind(package, ...
+    'st_collect_final_cut_coverage_metrics(');
+closeAt = strfind(package, ...
+    'close_report_model_context(state, modelName');
+verifyNotEmpty(testCase, scopeAt);
+verifyNotEmpty(testCase, loadAt);
+verifyNotEmpty(testCase, readbackAt);
+verifyNotEmpty(testCase, reportAt);
+verifyNotEmpty(testCase, metricAt);
+verifyNotEmpty(testCase, closeAt);
+verifyLessThan(testCase, scopeAt(1), loadAt(1));
+verifyLessThan(testCase, loadAt(1), reportAt(1));
+verifyLessThan(testCase, reportAt(1), metricAt(1));
+verifyLessThan(testCase, metricAt(1), closeAt(1));
+verifyTrue(testCase, contains(package, ...
+    'StandalonePipelineReportModelAlreadyLoaded'));
+verifyTrue(testCase, contains(package, ...
+    'StandalonePipelineReportModelLoadMismatch'));
+verifyTrue(testCase, contains(package, ...
+    'same_path(loadedFile, modelFile)'));
+verifyTrue(testCase, contains(package, 'close_system(modelName, 0)'));
+rewireAt = strfind(package, 'function item = rewire_packaged_input');
+rewireIsolationAt = strfind(package, ...
+    "if bdIsLoaded(modelName)");
+rewireCleanupAt = strfind(package, ...
+    'cleanup = onCleanup(@() restore_model_context');
+rewireIsolationAt = rewireIsolationAt( ...
+    rewireIsolationAt > rewireAt(1));
+verifyLessThan(testCase, rewireIsolationAt(1), rewireCleanupAt(1));
+end
+
 function testSummaryUsesExactSevenColumns(testCase)
 text = source('pipeline', ...
     'st_export_standalone_coverage_summary.m');

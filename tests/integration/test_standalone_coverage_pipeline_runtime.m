@@ -115,6 +115,10 @@ verifyEqual(testCase, checkSummary.Status, 'PASS');
 verifyEqual(testCase, numel(sltest.testmanager.getResultSets), ...
     resultCountBeforeCheck);
 verifyEqual(testCase, fileStateAfterCheck, fileStateBeforeCheck);
+for i = 1:numel(finalInfo.Targets)
+    verifyFalse(testCase, ...
+        bdIsLoaded(finalInfo.Targets(i).StandaloneModel));
+end
 
 afterModel = st_file_signature(cfg.ModelFile);
 afterTest = st_file_signature(cfg.TestFile);
@@ -170,6 +174,9 @@ verifyEqual(testCase, numel(sltest.testmanager.getResultSets), ...
 verifyEqual(testCase, file_state(fileparts(info.Manifest)), ...
     fileStateBeforeCheck);
 verifyFalse(testCase, bdIsLoaded(cfg.TopModel));
+for i = 1:numel(info.Targets)
+    verifyFalse(testCase, bdIsLoaded(info.Targets(i).StandaloneModel));
+end
 end
 
 function state = file_state(root)
