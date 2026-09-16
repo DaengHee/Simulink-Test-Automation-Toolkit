@@ -4,15 +4,19 @@
 경로 오류는 하네스가 깨진 게 아니라, 이 준비 단계 없이 바로 실행해서 생긴 것으로
 보입니다. 아래 순서로 다시 시도해주세요.
 
-## 1단계: Harness/입력/Assessment/Test Case 준비 (먼저 실행)
+## 1단계: 기존 Harness 기준으로 준비 (먼저 실행)
+
+Harness는 이미 모델에 만들어져 있으니 `st_run_from_harness`(Harness 생성부터 시작)
+말고 `st_run_after_harness`(기존 Harness부터 시작, Harness는 새로 안 만듦)를 씁니다.
 
 ```matlab
-st_run_from_harness('PreparationMode', 'FORCE', 'ExecuteTests', false);
+st_run_after_harness('PreparationMode', 'FORCE', 'ExecuteTests', false);
 ```
 
-이 명령이 Harness 생성·Signal Editor 입력·Assessment·Test Case를 전부 준비합니다.
-`st_run_standalone_coverage_pipeline`은 이 준비가 끝났다고 가정하고 실행만 하므로,
-이 단계 없이 바로 2단계로 가면 지금까지 본 것 같은 오류가 날 수 있습니다.
+이 명령이 (Harness 생성은 건너뛰고) Signal Editor 입력·Assessment·Test Case를
+준비합니다. `st_run_standalone_coverage_pipeline`은 이 준비가 끝났다고 가정하고
+실행만 하므로, 이 단계 없이 바로 2단계로 가면 지금까지 본 것 같은 오류가 날 수
+있습니다.
 
 ## 2단계: 실행 -> 패키징 -> 요약
 
