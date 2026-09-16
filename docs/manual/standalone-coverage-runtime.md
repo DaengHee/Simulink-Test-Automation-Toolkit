@@ -184,21 +184,32 @@ CUT의 objective를 모두 제외했거나 원래 objective가 없으면 `Covere
 for k = 1:numel(m.Targets)
     t = m.Targets(k);
     fprintf('[%03d] %s\n', k, t.CUTName);
-    fprintf('  report.html: %d  %s\n', isfile(t.ReportHTML), t.ReportHTML);
+    fprintf('  HTML:        %d  %s\n', isfile(t.ReportHTML), t.ReportHTML);
     fprintf('  CVT:         %d  %s\n', isfile(t.CoverageResult), t.CoverageResult);
     fprintf('  model closed: %d\n', ~bdIsLoaded(t.StandaloneModel));
 end
 ```
 
-`report.html`, `.cvt`가 모두 존재하고 각 `model closed` 값이 `1`이면 PACKAGE와
+`UT_REQ_{TC_NAME}.html`, `UT_REQ_{TC_NAME}.cvt`가 모두 존재하고 각 `model closed`
+값이 `1`이면 PACKAGE와
 cleanup 산출물 계약을 만족한다.
 
 ## 6. 패키지 Test Manager 열기
 
-`TestManager` 폴더의 `.mldatx` 파일을 UI에서 직접 열지 않는다. 그 파일의 Model
-SUT는 원본 Harness가 아니라 CUT별로 패키징된 standalone `.slx`이며, 각 모델은 서로
-다른 target 폴더에 있다. 아래 launcher는 해당 폴더들을 MATLAB path에 추가하고 모델을
-명시적으로 load한 뒤, 각 Test Case에 패키징 CVF를 적용한 상태로 Test Manager를 연다.
+`TestManager` 폴더의 `.mldatx`는 Test File이며, standalone Harness 모델은 CUT별
+결과 폴더의 `PackagedStandaloneModel`이다. Test Manager의 Model 속성은 파일 경로가
+아닌 모델명이다. 따라서 폴더 버튼으로 `.slx`를 선택해도 그 결과 폴더가 MATLAB path에
+없으면 Refresh/All이 `...Harness1`을 다시 찾지 못할 수 있다.
+
+수동 UI 사용 시에는 Harness `.slx`가 있는 대상 결과 폴더를 MATLAB Current Folder에서
+**Add to Path → Selected Folders**로 먼저 등록한 뒤 `.mldatx`를 열고, Model 필드의 폴더
+버튼으로 같은 Harness를 선택한다. 이 경로 등록은 MATLAB 세션/개인 설정의 일부이며
+`.mldatx`에 외부 모델 경로가 이식 가능하게 저장되는 것은 아니다. 다른 사용자는 같은
+결과 폴더를 받은 뒤에도 한 번은 해당 폴더를 path에 추가하거나 Harness를 열어야 한다.
+
+Model Editor에서 Harness `.slx`를 먼저 열어 loaded 상태로 만든 뒤, Test Manager의 Model
+필드에서 그 모델명을 선택하는 방법도 가능하다. 이 동작은 original model이나 original
+Harness를 바꾸지 않고 패키지 standalone Harness만 연다.
 
 ```matlab
 [m, ~] = st_load_standalone_pipeline_manifest( ...
@@ -209,9 +220,59 @@ assert(isfile(m.TestManagerLauncher), ...
 run(m.TestManagerLauncher)
 ```
 
-launcher가 출력하는 `Models=N | CVFs=N`에서 N이 target 수와 같아야 한다. 이후
-Test Manager의 Refresh/All이 `..._Harness1`을 찾지 못하면 launcher 출력 전체를
-공유한다.
+launcher는 Harness 모델을 먼저 load하고 CVF를 적용한 뒤 Test Manager를 연다. 수동으로
+동일한 순서를 재현하려면 아래처럼 한 CUT의 `PackagedStandaloneModel`을 먼저 연 뒤
+Test File을 load한다.
+
+```matlab
+t = m.Targets(1);
+assert(isfile(t.PackagedStandaloneModel));
+load_system(t.PackagedStandaloneModel)
+assert(bdIsLoaded(t.StandaloneModel));
+sltest.testmanager.load(m.TestManagerFile);
+sltest.testmanager.view
+```
+
+이후 Test Manager에서 해당 Test Case의 Model은 `t.StandaloneModel` 이름으로 선택한다.
+Refresh/All 직전에 이 모델을 닫거나 `rmpath(fileparts(t.PackagedStandaloneModel))` 하면
+동일한 `Harness1` not found 오류가 재현된다.
+
+launcher 없이 모든 CUT을 한 번에 여는 수동 절차는 아래와 같다. `<PipelineId>` 자리에는
+`latest.json`을 따르는 `'LATEST'`도 쓸 수 있다.
+
+```matlab
+[m, ~] = st_load_standalone_pipeline_manifest( ...
+    cfg.StandaloneCoverageRootDir, '<PipelineId>');
+
+% 동일 모델명이 이미 열려 있으면 충돌 방지를 위해 먼저 닫습니다.
+for k = 1:numel(m.Targets)
+    t = m.Targets(k);
+    assert(~bdIsLoaded(t.StandaloneModel), ...
+        '이미 열린 모델을 먼저 닫으세요: %s', t.StandaloneModel);
+    assert(isfolder(t.OutputDirectory));
+    assert(isfile(t.PackagedStandaloneModel));
+end
+
+% 모든 결과 폴더를 MATLAB path에 등록
+folders = cellstr(unique(string({m.Targets.OutputDirectory}), 'stable'));
+addpath(folders{:});
+
+% 모든 standalone Harness를 로드
+for k = 1:numel(m.Targets)
+    t = m.Targets(k);
+    load_system(t.PackagedStandaloneModel);
+    assert(bdIsLoaded(t.StandaloneModel), ...
+        'Harness load 실패: %s', t.StandaloneModel);
+end
+
+% 패키지 Test Manager 파일 열기
+sltest.testmanager.TestFile(m.TestManagerFile);
+sltest.testmanager.view
+```
+
+이 절차는 CVF를 적용하지 않으므로 Coverage 결과를 다시 보려면 launcher를 쓰거나 각
+Test Case의 Coverage Settings에서 `t.PackagedCVF`를 직접 지정한다. 등록한 path는
+세션 설정이므로 작업 후 `rmpath(folders{:})`로 되돌린다.
 
 ## 7. 원본 HTML의 CVF 적용 근거
 

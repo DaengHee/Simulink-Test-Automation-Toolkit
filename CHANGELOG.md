@@ -2,13 +2,127 @@
 
 ## Unreleased
 
-- Fixed standalone Harness export re-triggering
-  `Simulink:LoadSave:PartAlreadyWritten` on a Harness's ModelWorkspace part.
-  `sltest.harness.export` dirties the copied top model as a side effect, and
-  re-saving that unchanged content on a later target was rejected by Simulink
-  as a duplicate write -- reproducible even right after a full MATLAB restart.
-  The dirtied in-memory state is now discarded by reloading the on-disk copy
-  instead of resaving it.
+- Documented why Coverage filter rules show `n/a` in the name column: the
+  rules address blocks by SID, which the viewer resolves against a loaded
+  model. Opening the standalone model that sits beside the CVF fills the
+  names in; the original Top Model does not, because standalone models do
+  not reuse its SIDs.
+- Packaged standalone Coverage artifacts now carry a `UT_REQ_` prefix:
+  `{NUM}_UT_REQ_{TestCaseName}` target folders holding
+  `UT_REQ_{TestCaseName}.cvf`, `.cvt` and `.html`. The stem comes from the
+  new `st_artifact_stem`, which every producer and the checker share so the
+  names cannot drift apart; prefixing is idempotent and stays inside the
+  80-character cap. Harness, standalone model and input MAT names are
+  unchanged. Deliveries packaged before this change no longer satisfy the
+  checker and must be produced again.
+- `DecisionBlocks` now inventories the block types that create Simulink
+  Coverage objectives without looking like a decision: Saturate, Abs,
+  DeadZone, RateLimiter, Relay, Lookup_n-D, Interpolation_n-D, PreLookup,
+  Integrator, DiscreteIntegrator, ForIterator, WhileIterator and Logic sit
+  next to If/Switch/MinMax/MultiPortSwitch/SwitchCase under the same
+  D-numbering. A CUT with no If or Switch block could already report Decision
+  coverage and the specification never said where it came from. Masked blocks
+  such as Saturation Dynamic and Unit Delay Enabled report BlockType SubSystem
+  and stay out of a SearchDepth=1 BlockType scan, as do the control ports of a
+  child Enabled or Triggered Subsystem.
+- The `DecisionBlocks` cell on the TestSpecification sheet now always prints
+  `[T/F]`, and the specific branch kind moved to the `Outcome` column of
+  DecisionBlockDetails. The main sheet says where the branches are, the detail
+  sheet says what kind they are. MinMax and Multiport Switch used to print
+  `[SELECT]` and Switch Case `[CASE]` in the main cell; those rows now read
+  `[T/F]` and keep `SELECT` and `CASE` in the detail sheet. Outcome tokens are
+  no longer rendered inline, so they were renamed for legibility and grouped by
+  branch kind rather than by block: LIMIT, BAND, RATE, ON/OFF, SIGN, INTERVAL,
+  LOOP and CONDITION.
+- Blocks whose branch parameters are inactive are listed rather than filtered.
+  An Integrator with `LimitOutput=off; ExternalReset=none` appears with that
+  state in its expression. The column is a static inventory of candidates and
+  claims no objective count, so filtering on saved parameters alone would be
+  wrong whenever the data type or optimization settings decide the outcome.
+  Breakpoint parameters are copied as saved text and never resolved in a
+  workspace, so a lookup table configured from a variable shows the variable
+  name.
+- Block type knowledge moved into `st_specification_decision_catalog`. The scan
+  list, the outcome token, the failed-read fallback outcome and the display
+  alias were four literal copies of the same table, and the fallback copy only
+  ran when an expression read had already failed, so drift there was invisible.
+  Adding a type is now one catalog row, and only a type whose expression needs
+  special assembly still touches `st_specification_decision_descriptor`.
+- File hashing now reads on the Java side instead of copying every chunk
+  through MATLAB. The cost was never SHA-256 itself but marshalling the
+  bytes across the boundary, which dominated delivery verification once a
+  project had hundreds of targets. Files above 256 MB still stream through
+  the chunked reader, which also remains the fallback.
+- Added scoped warning suppression. `cfg.SuppressedWarnings` lists the
+  identifiers to silence while the standalone Harness export drives its
+  per-target loop; they are logged once and the caller's warning state is
+  restored afterwards. Bare words are rejected so a typo cannot widen into
+  suppressing everything. `st_collect_warning_ids` gathers the identifiers
+  a run actually emits, which `lastwarn` cannot do.
+- `st_check_standalone_coverage` now understands `ExecutionStatus=EXCEPT`.
+  A target whose Test Case raised an exception keeps only its standalone
+  Harness and input, so it is judged against that reduced contract, the
+  expected CVF/CVT/HTML counts exclude it, and an Action WARN explained
+  entirely by excepted targets no longer zeroes the manifest bit for every
+  target. Such a run reports PARTIAL with an EXCEPT row, never PASS.
+  Result filtering and coverage metrics are reported as not applicable for
+  an excepted target, while cleanup stays enforced so a leaked execution
+  model or an unrestored MATLAB path is still a failure.
+- `st_check_standalone_coverage` now scans for forbidden artifacts with a
+  single recursive listing instead of five patterns per target directory.
+  The unzipped Coverage report puts hundreds of companion assets in every
+  target root, so the old scan repeated that walk 5*(targets+1) times.
+- The standalone coverage pipeline and the verification snapshot no longer
+  run the toolbox dependency analysis. Both build an internal bundle that
+  is executed in place rather than delivered, so the informational product
+  list never repaid loading every dependency model.
+- Added `st_export_test_bundle('AnalyzeProducts', false)` to skip the
+  toolbox dependency analysis, which loads every dependency model and can
+  outlast the rest of the export. `RequiredProducts` is a bundle README
+  hint that no code reads back; the manifest policy records whether the
+  analysis ran.
+- Standalone Harness export now reports progress. Each target prints a
+  start line, the elapsed time of its source-copy save, Harness export and
+  standalone save, and a completion line; reused targets are named instead
+  of silently skipped. ZIP archiving reports the bundle size first.
+- Bundle manifest export now reports what it is doing. Toolbox dependency
+  analysis, whole-bundle SHA-256 hashing, and the source-unchanged recheck
+  each log a start/complete checkpoint with elapsed time, and the hashing
+  loop prints progress every five seconds.
+- Fixed standalone Harness export failing to re-identify a library-linked CUT.
+  `find_system` defaults stop at a link boundary, so a CUT inside a library
+  link reported no ports while its exported copy reported the real ones, and
+  the interface could never match. Both sides now resolve links and masks, and
+  the failure message lists the candidate blocks with their link status.
+- Standalone Harness export no longer runs dependency analysis over every
+  branch of the source Top Model. It analyses the generated standalone
+  models, copies their union of dependencies, and leaves the configuration
+  Top Model unloaded during replay. Actual standalone dependency gaps still
+  fail the export rather than producing a partial delivery.
+- Added local named model profiles, a generated anonymous FILE/MAT example,
+  read-only `st_check_readiness`, and strict `st_run_from_stage` execution.
+  Valid predecessors are inspected and reused; invalid predecessors block
+  instead of being repaired implicitly. Preparation checkpoints now preserve
+  independent input/output readbacks and incomplete-stage status.
+- Added hash-verified PACKAGE/SUMMARY regeneration into a new v3 PipelineId,
+  recording source provenance and zero new test executions. Existing Action
+  once-per-PipelineId rules and v2 reads remain supported. Failed/partial
+  derivatives do not replace latest; missing saved evidence blocks regeneration.
+- Added Korean task runbooks, behavior tests and disposable R2025b restart
+  acceptance cases. Local MATLAB is unavailable; runtime validation is pending.
+
+- Packaged standalone Coverage artifacts now use the safe Test Case name:
+  `{TestCaseName}.cvf`, `{TestCaseName}.cvt`, and `{TestCaseName}.html` at the
+  target root. The original `cvhtml` report binds a matching short filter name
+  so the HTML names the CVF that sits beside it, and the validated absolute CVF
+  binding is restored before final metric extraction.
+- Fixed the per-CUT Coverage report filter helpers being nested inside
+  `capture_package_evidence`, which left them unreachable from the report
+  subfunctions that bind and restore the CVF.
+- CoverageSummary.xlsx now reports the Decision and Execution objective counts
+  next to each percentage (`Decision Executed`, `Decision Total`,
+  `Execution Executed`, `Execution Total`). `st_check_standalone_coverage`
+  verifies the eleven-column set and the Test Case artifact names.
 - Fixed standalone Coverage packaging after per-CUT model cleanup. Each
   original Coverage `cvhtml` report, CVT, and final metric snapshot is now
   captured while its execution model is still open; PACKAGE verifies and

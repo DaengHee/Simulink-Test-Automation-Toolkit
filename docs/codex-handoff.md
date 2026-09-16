@@ -6,15 +6,83 @@
 
 ## 현재 기준
 
-- 기준일: 2026-09-14
+- 기준일: 2026-09-15
 - 활성 개발 브랜치: feat/harness-workflow-v2
 - Standalone Action 단순화 작업 시작 기준: 3e5ed63
 - 필수 기능 기준: feat/per-cut-filtered-execution의 7f0825e
 - 필수 handoff 기준: 2b3ba09 이후
 - 필수 진단 기준: 현재 브랜치 최신 커밋의 st_check_actual_system 포함
-- MATLAB R2025b 검증: 미수행
-- 현재 PC: MATLAB 실행 파일과 실제 result 폴더 없음
+- MATLAB R2025b 검증: 2026-09-15에 실제 업무 모델(대상 26개)로 standalone
+  export → EXECUTE → PACKAGE → SUMMARY → checker 경로를 최초 통과했다. 범위는
+  아래 "2026-09-15 R2025b 실행 확인"에 한정하며 그 밖은 여전히 미검증이다.
+- 현재 PC(에이전트): MATLAB 실행 파일과 실제 result 폴더 없음. 실행 증거는
+  사용자 PC에서만 나온다.
 - 완료 표현: 정적 구현 완료까지만 허용하며 인증 완료나 PR 준비 완료로 표현하지 않는다.
+
+## 2026-09-15 R2025b 실행 확인
+
+실제 업무 모델에서 통과한 범위만 기록한다. 여기 없는 항목은 미검증으로 남는다.
+
+- 확인된 경로: `st_run_standalone_coverage_pipeline('Action','ALL')`
+  (`SaveTestResult=false`)로 EXECUTE → PACKAGE → SUMMARY, 이어서
+  `st_check_standalone_coverage`. 대상 26개.
+- 확인된 산출물: `FILES model=26 input=26 cvf=25 cvt=25 html=25 result=0
+  forbidden=0`, `SUMMARY rows=26 columns=11 status=OK`. 11열 CoverageSummary와
+  TC 이름 기반 `{TC}.cvf`/`{TC}.cvt`/`{TC}.html` 계약이 실제로 성립했다.
+  이 확인 이후 제출물 이름 규칙에 `UT_REQ_` 접두사를 도입했으므로, 아래 기록의
+  `{TC}` 표기는 현재 코드에서 `UT_REQ_{TC}`로 읽는다.
+- 라이브러리 링크: CUT이 링크 **내부**에 있는 경우
+  (`StaticLinkStatus='implicit'`, ReferenceBlock이 라이브러리 하위 블록)가 실재한다.
+  `find_system` 기본값은 링크 경계를 넘지 않아 원본 CUT의 포트가 0개로 보이고
+  export 사본은 실제 포트를 보고하므로 인터페이스 비교가 영원히 실패했다.
+  `identify_standalone_cut`/`interface_signature`에 FollowLinks/LookUnderMasks를
+  명시해 복구했고, 그 뒤 26개 중 25개가 정상 패키징됐다. 사용자 측정치:
+  기본 옵션 1개(자기 자신) vs 링크 추적 5개.
+- EXCEPT: 알려진 defect 모델 1개가 `ExecutionStatus=EXCEPT`로 끝났고 standalone
+  Harness와 Input은 보존됐다. 이것이 정상 기대 동작이다. checker는 EXCEPT를
+  몰라 26개 전부의 B1·B6을 0으로 만들었으므로 축소 계약으로 고쳤다.
+  B5(필터)·B7(metric)은 비해당, B10(cleanup)은 계속 강제한다.
+- 판정 정책: 모든 비트가 1이어도 EXCEPT 대상이 있으면 PASS가 아니라 PARTIAL이다.
+  커버리지 누락을 녹색 코드 뒤에 숨기지 않는다는 사용자 결정이다.
+- 성능 실측: `dependencies.toolboxDependencyAnalysis`가 manifest 단계를 지배해
+  사용자가 중단했다. RequiredProducts를 읽는 코드가 없어 배송 번들은 옵션으로,
+  pipeline/verification snapshot의 내부 번들은 무조건 끈다. checker는 금지 산출물
+  스캔을 단일 순회로 바꾼 뒤에도 226초이며 남은 비용은 SHA-256 재해시다.
+- 이 실행으로 검증되지 **않은** 것: 패키지 Test Manager launcher와 MLDATX 열기,
+  Coverage REPORT 화살표가 여는 `UT_REQ_{TC}.html`, HTML의 CVF 표시 이름,
+  결과 재생성(v3),
+  model profile과 단계 재시작, `AnalyzeProducts=true`의 실제 소요시간,
+  경고 억제(`cfg.SuppressedWarnings`).
+
+## 2026-09-15 profile / 단계 재시작 구현
+
+- `st_save_model_profile`, `st_list_model_profiles`, `st_select_model_profile`:
+  로컬 `model_profiles.mat`, 활성 선택 `runtime_target.mat`. profile별 결과/상태 경로 분리.
+  여러 모델 병렬 실행 기능이 아니며 기존 단일 모델 선택도 유지한다.
+- `st_create_example(destination)`: FILE/MAT 익명 model/Excel/input 로컬 생성만 수행.
+- `st_check_readiness` / `st_run_from_stage`: 선행 단계 무수정 검사 후 명시 단계부터
+  끝까지 실행. 기존 AUTO/FORCE 동작과 구분한다. 무효 선행 단계는 자동 복구하지 않는다.
+- workflow state v2 `RestartEvidence`: 독립 stage input/output hash, RUNNING/FAIL/
+  UNVERIFIED/OK 상태. 기존 v1 구조 readback은 허용하지만 ASSESSMENT와 non-OFF SLDV는
+  새 증거가 필요하다. readback 실패는 기존 workflow를 깨지 않고 WARN으로 남는다.
+- pipeline manifest v3: ReplayInputs/PackageInventory; v2 로드는 유지한다.
+  PACKAGE/SUMMARY 재생성은 새 id와 provenance 사본을 만들고 실행 0회, export 0회를 기록한다.
+  PACKAGE import 1회 / SUMMARY import 0회. 기존 id의 Action 1회 제한은 바꾸지 않는다.
+  실패/부분 파생 결과는 latest를 바꾸지 않는다. `.work` 유실 시 PACKAGE 재생성 불가.
+- 실제 업무 MATLAB 실행은 하지 않았다. MISS_HIT 문법 검사와 diff 검사만 수행한다.
+  `docs/manual/runtime-verification.md`에 새/기존 integration과 수동 GUI 검증을 모았다.
+- 미검증 핵심: R2025b Harness read-only load/close의 Dirty/synchronization 동작,
+  `TestIteration.TestParams` 실제 readback 형태, Assessment step 직렬화 안정성,
+  예제의 기대값/APPLY 이후 재시작, EXCEPT와 저장 결과 import, 재생성 후 checker 전 비트.
+  다른 릴리스에서 해석할 수 없는 binding은 성공으로 추정하지 않고 차단한다.
+- 2026-09-15 후속: STANDALONE_HARNESS export의 전체 Top Model dependency 분석은
+  unrelated branch와 Function Caller 이름 때문에 장시간/실패할 수 있어, 생성된
+  standalone 모델별 분석으로 변경했다. runner와 standalone preparation은 설정용
+  Top Model을 로드하지 않는다. R2025b에서 실제 dependency union, dependency 없는
+  standalone 모델, 누락 standalone dependency의 fail-closed 경계를 검증해야 한다.
+- 원본 모델이 바뀐 뒤 과거 결과를 재생성하면 현재 소스 불변 검사 B9는 실패할 수 있다.
+  원본/파생 이력을 삭제·이동하기 전 재생성 및 provenance 경로 의존성을 안내한다.
+- 사용자는 `docs/manual/README.md`부터 읽는다. 이 handoff는 사용자 설명을 대체하지 않는다.
 
 ## 변경 불가 핵심 결정
 
@@ -135,9 +203,14 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 14. ExpectedUpdateMode=APPLY 갱신과 선택적 재실행 결과가 종합 보고서에 남는지 확인한다.
 15. export 전후 원본 모델·Test File checksum, Dirty 상태와 Harness inventory가
     불변인지 확인한다.
-16. If/Switch/MinMax/MultiPortSwitch/SwitchCase가 있는 CUT의 명세서를 export하고,
-    블록 이름 다음 줄의 D번호·분기종류·저장 파라미터 표현과 DecisionBlockDetails의
-    Outcome/Expression/ReadStatus가 실제 블록 설정과 일치하는지 확인한다.
+16. If/Switch/MinMax/MultiPortSwitch/SwitchCase와 Saturate/Abs/DeadZone/RateLimiter/
+    Relay/Lookup_n-D/Interpolation_n-D/PreLookup/Integrator/DiscreteIntegrator/
+    ForIterator/WhileIterator/Logic이 있는 CUT의 명세서를 export하고, 블록 이름 다음
+    줄의 D번호·저장 파라미터 표현과 DecisionBlockDetails의
+    Outcome/Expression/ReadStatus가 실제 블록 설정과 일치하는지 확인한다. 메인 시트가
+    전부 `[T/F]`이고 세부 시트 `Outcome`만 종류별로 갈리는지 확인한다. 각 암시적
+    블록의 `BlockType` 문자열과 파라미터 이름이 실제 `get_param` 결과와 일치하는지,
+    철자가 틀려 조용히 0건으로 나오지 않는지 확인한다.
 17. FILE+MAT 단일/복수 Dataset, 명시적 MatVariableName, Scenario 간 및 Harness
     interface mismatch, Dataset 없음·시간 없음, nested dataNoEffect를 확인하고 MAT
     실행에서 sldvsimdata와 parameter override가 호출되지 않는 증거를 보관한다.
@@ -152,7 +225,8 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 20. `st_run_standalone_coverage_pipeline`의 `ALL` live Result 경로와 `EXECUTE` 뒤
     새 MATLAB 세션에서 `PACKAGE`/`SUMMARY`를 재개하는 경로를 모두 확인한다.
     standalone TC property readback, Test Case별 run 1회와 CVF 등록 1회, 공식 ZIP의
-    root report.html, CVT, `%03d` 폴더와 정확한 7열 CoverageSummary.xlsx를 확인한다.
+    `UT_REQ_` 접두사가 붙은 HTML/CVF/CVT, `%03d_UT_REQ_{TC}` 폴더와 정확한 11열
+    CoverageSummary.xlsx를 확인한다.
     Decision/Execution 분모 0은 N/A여야 하며 원본 모델·Test File·Excel·Input
     checksum, Dirty와 Harness inventory가 전후 같아야 한다. 최종
     `st_check_standalone_coverage`가 `1111111111 PASS`인지 확인하고 Test Manager
@@ -281,14 +355,37 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 - 시간값 선택은 `st_specification_max_time`으로 분리했고, OFF에 시간 입력이 있어도
   입력 Tmax를 쓰지 않는 회귀 검사와 SLDV의 StopTime fallback 금지 검사를 추가했다.
   현재 PC에는 MATLAB이 없어 이 변경도 정적 검사만 수행했다.
-- 명세서의 `DecisionBlocks` 열은 CUT 아래 If/MinMax/Switch/MultiPortSwitch/SwitchCase
-  후보를 블록 이름과 `D번호 [분기종류]블록유형 (저장된 조건/선택 설정)` 두 줄씩
-  기록한다. If/Switch는 `[T/F]`, MinMax/MultiPortSwitch는 `[SELECT]`, SwitchCase는
-  `[CASE]`를 사용한다. 원본 Outcome, BlockType, Name, Expression, 전체 경로와 개별
-  JSON 객체, 읽기 상태는 `DecisionBlockDetails` 시트에 블록별 행으로 기록한다.
+- 명세서의 `DecisionBlocks` 열은 CUT 아래 명시적 분기(If/MinMax/Switch/
+  MultiPortSwitch/SwitchCase)와 암시적 분기(Saturate/Abs/DeadZone/RateLimiter/Relay/
+  Lookup_n-D/Interpolation_n-D/PreLookup/Integrator/DiscreteIntegrator/ForIterator/
+  WhileIterator/Logic) 후보를 블록 이름과 `D번호 [T/F]블록유형 (저장된 조건/선택
+  설정)` 두 줄씩 기록한다. **메인 시트는 분기 종류와 무관하게 항상 `[T/F]`를 쓴다.**
+  구체적인 Outcome(`SELECT`, `CASE`, `LIMIT`, `BAND`, `RATE`, `ON/OFF`, `SIGN`,
+  `INTERVAL`, `LOOP`, `CONDITION`)은 BlockType, Name, Expression, 전체 경로, 개별 JSON
+  객체, 읽기 상태와 함께 `DecisionBlockDetails` 시트에 블록별 행으로만 기록한다.
   Name은 경로 문자열을 분리하지 않고 `get_param(path,'Name')`으로 읽는다. `SearchDepth=1`로
   CUT의 직계 자식만 정렬·중복 제거하며 하위 Subsystem, 마스크, 라이브러리 링크,
   Variant, 참조 모델 내부 및 Stateflow/MATLAB Function 내부 분기는 포함하지 않는다.
+  자식 Enabled/Triggered Subsystem의 제어 포트 분기와 마스크 Subsystem으로 구현된
+  Saturation Dynamic/Dead Zone Dynamic/Unit Delay Enabled/Unit Delay Resettable은
+  `BlockType`이 `SubSystem`이므로 제외한다.
+- 스캔 대상 BlockType, Outcome 토큰, 표시 별칭, 읽을 파라미터는 전부
+  `src/exporting/st_specification_decision_catalog.m` 한 곳에 있다. 타입 추가는 catalog
+  한 행이며, 표현식 조립이 불규칙한 타입만 `st_specification_decision_descriptor`의
+  `case`를 추가로 필요로 한다(`Formatter` 열이 그 구분을 명시한다). 파라미터가
+  비활성이어도 행을 거르지 않고 상태를 표현식에 남긴다. breakpoint 등 값은 workspace
+  에서 평가하지 않고 저장된 문자열 그대로 옮긴다.
+- 의도적으로 열어 둔 확장점 두 가지. (1) `outcome`이 `switch` 앞에서 배정되므로
+  `Formatter="CUSTOM"` case가 읽은 값에 따라 Outcome을 덮어쓸 수 있다(메인 셀은
+  `[T/F]` 고정이라 영향 없음). (2) `Delay` 블록과 Enabled/Triggered Subsystem 지원은
+  각각 catalog 한 행 또는 포트 탐침 추가로 확장 가능하다.
+- MATLAB 없이 작성한 미검증 런타임 가정: `PreLookup`의 대문자 L, `Lookup_n-D`와
+  `Interpolation_n-D`의 하이픈 표기, `Saturate`(Saturation 블록) BlockType 철자.
+  `find_system`은 모르는 BlockType에 에러가 아니라 빈 결과를 주므로 철자가 틀리면
+  **조용히 0건**이 된다. 반면 필수 파라미터 이름이 틀리면 `조건식 읽기 실패` WARN 행이
+  되어 note에 원인이 남는다. 그래서 BlockType 철자 세 개를 가장 먼저 확인한다.
+  이름이 불확실한 파라미터는 catalog의 `OptionalParameters`에 두어 실패해도 표현식에서
+  빠지기만 하게 했고, 런타임 확인 후 `Parameters`로 승격한다.
 - 명세서 Excel의 첫 번째 시트는 `사용법`이다. 사용자 실행 진입점과 단계별 고급
   명령의 역할, 사용 시점, 대표 호출을 기록하며 같은 내용은
   `docs/execution-commands.md`에도 유지한다.
@@ -349,7 +446,7 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 - pipeline manifest와 SHA-256은 원자적으로 갱신되며 latest.json으로 재개한다.
   `PACKAGE`는 공유 Test Manager 사본, CUT별 standalone 모델·input·CVF·CVT와
   Test Manager Coverage Results의 REPORT 화살표가 여는 원본 `cvhtml` root
-  report.html을 만들고 `SUMMARY`는 정확한 7열 CoverageSummary.xlsx를 원자적으로
+  TC 이름 `.html`을 만들고 `SUMMARY`는 정확한 11열 CoverageSummary.xlsx를 원자적으로
   교체한다. PDF, TestSummary.xlsx와 coverage-metrics.mat는 만들지 않는다.
 - bundle 실행 후 copied Test File과 copied Top Model을 닫고 caller의 MATLAB path와
   현재 폴더를 복원한다. 이 상태와 외부 Harness/Input 파일 checksum도 manifest와
@@ -360,7 +457,7 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
 - PACKAGE의 남은 `cvsave`는 닫힌 execution model을 참조하는 Coverage 객체를
   직렬화하므로, 실행 model이 열린 `capture_package_evidence`로 이동했다. PACKAGE는
   CVT/HTML/metric evidence의 SHA-256을 검증해 복사만 한다. R2025b에서는 ALL 및
-  EXECUTE→PACKAGE→SUMMARY 모두 `Package=OK`, CUT별 `report.html`/`.cvt` 생성과
+  EXECUTE→PACKAGE→SUMMARY 모두 `Package=OK`, CUT별 TC 이름 `.html`/`.cvt` 생성과
   `st_check_standalone_coverage = 1111111111`을 확인해야 한다. PACKAGE 예외는
   `PackageFailure.Stack`에 최초 호출 파일·라인을 보존한다. 실행 명령은
   `docs/manual/standalone-coverage-runtime.md`에 있다.
@@ -395,6 +492,33 @@ result와 CVF를 읽기만 하며, 점검을 위해 연 모델은 저장하지 �
   CVSAVE/CVHTML/metric에 실제로 넘길 새 객체에 CVF를 다시 bind하고 그 즉시 readback한
   뒤 진행한다. 새 `ALL`에서 `Standalone original Coverage report CVF binding complete`
   로그와 CVF의 Excluded/Justified HTML 표시를 확인해야 한다.
+- packaged Test Manager launcher의 `CoverageFilterFilename` readback은 R2025b에서
+  canonical absolute path 대신 CVF basename을 반환할 수 있다. 빈 readback은 계속
+  실패로 처리하되 동일 basename은 성공으로 인정한다. 이미 PACKAGE가 완료된 결과는
+  새 template을 `m.TestManagerLauncher`로 복사한 뒤 다시 실행해 재패키징 없이 연다.
+- Test Manager Model SUT 속성은 model file path가 아니라 model name만 직렬화한다.
+  그러므로 `.mldatx`를 다른 사용자에게 전달해도 standalone Harness 결과 folder가
+  MATLAB path에 없으면 UI의 folder picker 뒤 Refresh/All에서 model-not-found가
+  재발할 수 있다. 수동 UI 경로는 folder를 Add to Path 한 뒤 같은 Harness를 선택하는
+  것이며 launcher는 그 반복 작업의 편의 수단일 뿐 portable path를 저장하는 해법은
+  아니다. CVF 표시 metadata는 filter name=`TestCaseName`, description=`none`, 모든
+  rule rationale=`none`으로 고정했다. PACKAGE target folder, packaged CVF/CVT와
+  공식 report HTML은 `TestCaseName`을 안전화하고 `UT_REQ_` 접두사를 붙인
+  `UT_REQ_{TC}.cvf`/`.cvt`/`.html` 이름을 사용하고 report tree는 별도
+  `_CoverageReport` 폴더 없이 target root에 배치한다. 이 stem은
+  `st_artifact_stem`이 유일하게 만들며 생산자 4곳과 checker가 모두 그 함수를
+  호출해야 한다. 접두사 부여는 멱등이고 80자 상한 안에서 계산한다. HTML의 companion asset은 report render를 위해 같은 root에 유지한다.
+  `cvhtml`에는 같은 폴더에 놓일 짧은 표시용 CVF 이름을 bind하고, scratch 폴더가
+  제거된 뒤 최종 metric 추출이 같은 coverage 객체를 재사용하므로 보고서 생성
+  직후 검증된 절대 경로 CVF 바인딩을 복원한다. 이 bind/복원 helper는
+  `capture_package_evidence`의 nested function이면 보고서 subfunction에서 호출할
+  수 없으므로 file-level subfunction으로 유지해야 한다. R2025b 재검증이 필요하다.
+- Test Case 실행 예외(예: simulation overflow)는 `ExecutionStatus=EXCEPT`로 기록한다.
+  해당 상태여도
+  PACKAGE는 standalone Harness, 존재하는 Signal Editor input, target manifest를 먼저
+  대상 folder에 보존한다. 이후 CVF/CVT/HTML만 `FAIL`로 남긴다. 모델/input 보존 자체가
+  실패한 경우에는 그 실패가 PackageStatus에 기록된다. `ContinueOnFailure=true`에서는
+  다음 target도 계속 처리한다. R2025b 재검증이 필요하다.
 - 실제 R2025b에서 사용자가 Top Model을 열지 않았는데도 target 입력 수집 후
   `StandaloneModelStillLoadedBeforeRun`이 발생했다. export 중간 상태가 아니라
   `st_export_test_bundle` 진입 전 load 상태를 기준으로 dependency/Harness API가

@@ -5,7 +5,8 @@ function [results, updates, summary] = st_run_tests_per_cut(varargin)
 %     'ContinueOnFailure', true, ...
 %     'ReportMode', 'SUMMARY', ...
 %     'FailOnNonPass', false, ...
-%     'ResultFilterMode', 'DURING_RUN')
+%     'ResultFilterMode', 'DURING_RUN', ...
+%     'LoadRuntimeModel', true)
 
 p = inputParser;
 p.FunctionName = 'st_run_tests_per_cut';
@@ -33,6 +34,11 @@ addParameter(p, 'ResultFile', '', ...
     @(x) ischar(x) || isstring(x));
 addParameter(p, 'CapturePackageEvidence', false, ...
     @(x) islogical(x) && isscalar(x));
+% Standalone exported bundles rewire Test Cases to disposable Harness
+% models.  They must not load cfg.TopModel solely to read runtime config,
+% because that would reintroduce unrelated whole-model dependencies.
+addParameter(p, 'LoadRuntimeModel', true, ...
+    @(x) islogical(x) && isscalar(x));
 parse(p, varargin{:});
 
 continueOnFailure = logical(p.Results.ContinueOnFailure);
@@ -45,12 +51,13 @@ writeRunSummaryExcel = logical(p.Results.WriteRunSummaryExcel);
 saveTestResult = logical(p.Results.SaveTestResult);
 resultFile = strtrim(char(string(p.Results.ResultFile)));
 capturePackageEvidence = logical(p.Results.CapturePackageEvidence);
+loadRuntimeModel = logical(p.Results.LoadRuntimeModel);
 if saveTestResult && isempty(resultFile)
     error('simtest:PerCutResultFileRequired', ...
         'ResultFile is required when SaveTestResult=true.');
 end
 
-cfg = st_require_runtime_target();
+cfg = st_require_runtime_target('LoadModel', loadRuntimeModel);
 existingFilterPolicy = st_coverage_filter_existing_policy( ...
     cfg.CoverageFilterExistingPolicy);
 if ~strcmp(st_coverage_filter_application_mode( ...
@@ -480,12 +487,12 @@ for i = 1:n
             FilterRestoreStatus(i) = "NOT_REQUIRED";
         end
 
-        Status(i) = "FAIL";
+        Status(i) = "EXCEPT";
         Message(i) = string(targetError.message);
         st_log(cfg, 'ERROR', ...
-            '[PER_CUT %d/%d] failed | %s: %s', ...
+            '[PER_CUT %d/%d] exception | %s: %s', ...
             i, n, targetError.identifier, targetError.message);
-        append_event(logPath, i, 'TARGET_FAIL', targetError.message);
+        append_event(logPath, i, 'TARGET_EXCEPT', targetError.message);
 
         if isempty(abortError) && ~continueOnFailure
             abortError = targetError;
@@ -495,7 +502,7 @@ for i = 1:n
     [ModelCleanupStatus(i), cleanupMessage] = close_execution_model(row, cfg);
     append_event(logPath, i, 'MODEL_CLEANUP', cleanupMessage);
     if ModelCleanupStatus(i) == "FAIL"
-        Status(i) = "FAIL";
+        Status(i) = "EXCEPT";
         Message(i) = "Execution model cleanup failed: " + cleanupMessage;
         if isempty(abortError)
             abortError = MException('simtest:ExecutionModelCleanupFailed', ...
@@ -507,7 +514,7 @@ for i = 1:n
     append_event(logPath, i, 'PATH_CLEANUP', ...
         char(PathCleanupStatus(i)));
     if PathCleanupStatus(i) == "FAIL"
-        Status(i) = "FAIL";
+        Status(i) = "EXCEPT";
         Message(i) = "Execution model path cleanup failed";
         if isempty(abortError)
             abortError = MException('simtest:ExecutionModelPathCleanupFailed', ...
@@ -535,7 +542,7 @@ for i = 1:n
         artifacts(end+1,:) = {No(i), "TARGET", "MANIFEST", ...
             string(manifestPath), "OK", "Target manifest written"};
     catch manifestME
-        Status(i) = "FAIL";
+        Status(i) = "EXCEPT";
         Message(i) = "Target manifest write failed: " + ...
             string(manifestME.message);
         artifacts(end+1,:) = {No(i), "TARGET", "MANIFEST", ...
@@ -597,7 +604,7 @@ if ~isempty(abortError)
         'Partial PER_CUT report was written to %s.', summary.Manifest));
     throw(abortError);
 end
-nonPassMask = ismember(Status, ["FAIL","WARN"]);
+nonPassMask = ismember(Status, ["FAIL","EXCEPT","WARN"]);
 if failOnNonPass && (any(nonPassMask) || strcmp(summary.Status, 'FAIL'))
     nonPassCount = sum(nonPassMask);
     if nonPassCount > 0
@@ -785,7 +792,8 @@ try
             ['Execution model changed or closed after coverage data capture. ' ...
              'Expected=%s'], modelFile);
     end
-    capture_package_coverage_report(reportZip, coverageObjects, row, cfg);
+    capture_package_coverage_report(reportZip, coverageObjects, row, ...
+        coverageFilterPath, cfg);
     if ~bdIsLoaded(modelName) || ...
             ~same_path(get_param(modelName, 'FileName'), modelFile)
         error('simtest:StandalonePackageEvidenceModelLost', ...
@@ -820,6 +828,7 @@ catch ME
         'Standalone package evidence capture failed | CUT=%s | %s: %s', ...
         char(string(row.CUTName)), ME.identifier, ME.message);
     rethrow(ME);
+end
 end
 
 function apply_package_report_filter(coverageObjects, row, coverageFilterPath, cfg)
@@ -877,7 +886,6 @@ for i = 1:numel(actual)
     end
 end
 end
-end
 
 function save_package_evidence_cvt(path, objects, cfg)
 [folder, name] = fileparts(path);
@@ -893,7 +901,7 @@ end
 end
 
 function capture_package_coverage_report( ...
-        reportZip, coverageObjects, row, cfg)
+        reportZip, coverageObjects, row, coverageFilterPath, cfg)
 if numel(coverageObjects) ~= 1
     error('simtest:StandalonePackageEvidenceCoverageReportAmbiguous', ...
         ['Expected exactly one final Coverage object for the original ' ...
@@ -902,6 +910,8 @@ if numel(coverageObjects) ~= 1
 end
 writableCleanup = st_enter_writable_coverage_directory(cfg, 'CVHTML');
 scratchDirectory = pwd;
+bind_report_filter_display_name(coverageObjects, row, coverageFilterPath, ...
+    scratchDirectory, cfg);
 reportDirectory = fullfile(scratchDirectory, 'CoverageReport');
 mkdir(reportDirectory);
 reportHTML = fullfile(reportDirectory, 'report.html');
@@ -931,9 +941,60 @@ if ~isfile(reportZip)
     error('simtest:StandalonePackageEvidenceCoverageReportMissing', ...
         'The promoted package evidence ZIP is missing: %s', reportZip);
 end
+% Restore the validated absolute CVF binding. The display filter lives in
+% the scratch directory that was just removed, and the same coverage
+% objects still feed final metric extraction.
+apply_package_report_filter(coverageObjects, row, coverageFilterPath, cfg);
 st_log(cfg, 'INFO', ...
     ['Standalone original Coverage report capture complete | CUT=%s | ' ...
      'ZIP=%s'], char(string(row.CUTName)), reportZip);
+end
+
+function bind_report_filter_display_name( ...
+        coverageObjects, row, coverageFilterPath, scratchDirectory, cfg)
+% Bind a short local name only for the HTML UI; CVT was already saved with
+% the validated execution filter binding.
+if ~st_coverage_filter_active(row)
+    return;
+end
+sourceFilter = char(string(coverageFilterPath));
+if isempty(sourceFilter) || ~isfile(sourceFilter)
+    error('simtest:StandalonePackageEvidenceCoverageFilterMissing', ...
+        'Coverage report CVF is missing for %s: %s', ...
+        char(string(row.CUTName)), sourceFilter);
+end
+% Must equal the CVF that PACKAGE places beside this report, or the
+% filter name printed in the HTML points at a file that is not there.
+displayFilter = [st_artifact_stem(char(string(row.TestCaseName))) '.cvf'];
+destinationFilter = fullfile(scratchDirectory, displayFilter);
+st_log(cfg, 'INFO', ...
+    ['Standalone original Coverage report display filter start | CUT=%s | ' ...
+     'Filter=%s'], char(string(row.CUTName)), displayFilter);
+try
+    [copied, copyMessage] = copyfile(sourceFilter, destinationFilter, 'f');
+    if ~copied
+        error('simtest:StandalonePackageEvidenceCoverageFilterCopyFailed', ...
+            'Cannot stage report display CVF %s: %s', ...
+            destinationFilter, copyMessage);
+    end
+    coverageObjects{1}.filter = displayFilter;
+    actual = string(coverageObjects{1}.filter);
+    if ~filter_name_matches(displayFilter, actual)
+        error('simtest:StandalonePackageEvidenceCoverageFilterApplyFailed', ...
+            ['Could not bind the report display CVF to the coverage object. ' ...
+             'CUT=%s | Expected=%s | Actual=%s'], ...
+            char(string(row.CUTName)), displayFilter, char(actual));
+    end
+    st_log(cfg, 'INFO', ...
+        ['Standalone original Coverage report display filter complete | ' ...
+         'CUT=%s | Filter=%s'], char(string(row.CUTName)), displayFilter);
+catch ME
+    st_log(cfg, 'ERROR', ...
+        ['Standalone original Coverage report display filter failed | ' ...
+         'CUT=%s | %s: %s'], char(string(row.CUTName)), ...
+        ME.identifier, ME.message);
+    rethrow(ME);
+end
 end
 
 function ensure_evidence_report_html(reportDirectory, generatedHTML)

@@ -240,16 +240,16 @@ sourceState = struct( ...
         'SHA256', st_file_signature(inputSource).SHA256));
 targets = repmat(empty_target(), count, 1);
 for i = 1:count
-    targetDirectory = fullfile(pipelineRoot, sprintf('%03d_CUT_%d', i, i));
+    targetDirectory = fullfile(pipelineRoot, ...
+        sprintf('%03d_UT_REQ_TC_%d', i, i));
     mkdir(targetDirectory);
     harness = sprintf('Harness%d', i);
     model = fullfile(targetDirectory, [harness '.slx']);
     input = fullfile(targetDirectory, sprintf('input%d.mat', i));
-    cvf = fullfile(targetDirectory, sprintf('cut%d.cvf', i));
-    cvt = fullfile(targetDirectory, sprintf('cut%d.cvt', i));
-    reportDirectory = fullfile(targetDirectory, 'TestReport');
-    mkdir(reportDirectory);
-    html = fullfile(reportDirectory, 'report.html');
+    cvf = fullfile(targetDirectory, sprintf('UT_REQ_TC_%d.cvf', i));
+    cvt = fullfile(targetDirectory, sprintf('UT_REQ_TC_%d.cvt', i));
+    reportDirectory = targetDirectory;
+    html = fullfile(reportDirectory, sprintf('UT_REQ_TC_%d.html', i));
     write_text(model, 'model');
     write_text(input, 'input');
     write_text(cvf, 'cvf');
@@ -329,12 +329,18 @@ CUT_NAME = "CUT_" + string(NUM);
 CUT_PATH = "Top/CUT_" + string(NUM);
 TestCaseName = "TC_" + string(NUM);
 HarnessName = "Harness" + string(NUM);
+DecisionExecuted = ones(count, 1);
+DecisionTotal = repmat(2, count, 1);
 Decision = repmat("50.00", count, 1);
+ExecutionExecuted = repmat(3, count, 1);
+ExecutionTotal = repmat(4, count, 1);
 Execution = repmat("75.00", count, 1);
 T = table(NUM, CUT_NAME, CUT_PATH, TestCaseName, HarnessName, ...
-    Decision, Execution, 'VariableNames', ...
+    DecisionExecuted, DecisionTotal, Decision, ...
+    ExecutionExecuted, ExecutionTotal, Execution, 'VariableNames', ...
     {'NUM','CUT_NAME','CUT_PATH','Test Case Name','Harness Name', ...
-    'Decision (%)','Execution (%)'});
+    'Decision Executed','Decision Total','Decision (%)', ...
+    'Execution Executed','Execution Total','Execution (%)'});
 writetable(T, summaryPath, 'Sheet', 'CoverageSummary');
 
 manifest = struct( ...
@@ -411,4 +417,83 @@ end
 
 function remove_fixture(path)
 if isfolder(path), rmdir(path, 's'); end
+end
+
+function testForbiddenScanWalksTheTreeOnce(testCase)
+% Five patterns times every target directory meant the unzipped Coverage
+% report assets were walked again and again.
+text = checker_source();
+verifyTrue(testCase, contains(text, 'forbiddenPaths = forbidden_paths(pipelineRoot)'));
+verifyTrue(testCase, contains(text, 'forbidden_under(forbiddenPaths, item.OutputDirectory)'));
+verifyTrue(testCase, contains(text, "'Forbidden', numel(forbiddenPaths)"));
+verifyFalse(testCase, contains(text, 'forbidden_count('));
+verifyEqual(testCase, numel(strfind(text, "dir(fullfile(root, '**', '*'))")), 1);
+end
+
+function testExceptedTargetDoesNotFailTheOtherTargets(testCase)
+% A known-defective CUT keeps its Harness and input but produces no
+% coverage. That must not zero the package bit for every other target.
+[root, manifest] = complete_fixture(testCase, 2);
+delete(manifest.Targets(2).PackagedCVF);
+delete(manifest.Targets(2).CoverageResult);
+delete(manifest.Targets(2).ReportHTML);
+manifest.Targets(2).ExecutionStatus = 'EXCEPT';
+manifest.Targets(2).PackageStatus = 'FAIL';
+manifest.Targets(2).PackagedCVF = '';
+manifest.Targets(2).PackagedCVFSHA256 = '';
+manifest.Targets(2).CoverageResult = '';
+manifest.Targets(2).CoverageResultSHA256 = '';
+manifest.Targets(2).ReportHTML = '';
+manifest.Actions.EXECUTE.Status = 'WARN';
+manifest.Actions.PACKAGE.Status = 'WARN';
+manifest.Actions.SUMMARY.Status = 'WARN';
+manifest.Status = 'PARTIAL';
+st_write_standalone_pipeline_manifest(root, manifest);
+evalc('[code, summary, details] = st_check_standalone_coverage(''OutputRoot'', root);');
+verifyEqual(testCase, code, '1111111111');
+verifyEqual(testCase, summary.Status, 'PARTIAL');
+verifyEqual(testCase, summary.ExceptedTargetCount, 1);
+verifyEqual(testCase, char(details.Status(1)), 'PASS');
+verifyEqual(testCase, char(details.Status(2)), 'EXCEPT');
+% Result filtering and metrics never ran for that target, so those bits are
+% reported as not applicable rather than as defects.
+verifyEqual(testCase, char(details.B5(2)), '-');
+verifyEqual(testCase, char(details.B7(2)), '-');
+% Cleanup is still enforced: the model must be closed and the path restored.
+verifyEqual(testCase, char(details.B10(2)), '1');
+end
+
+function testExceptedTargetStillNeedsCleanup(testCase)
+% The EXCEPT allowance must not excuse a leaked execution model.
+[root, manifest] = complete_fixture(testCase, 2);
+delete(manifest.Targets(2).PackagedCVF);
+delete(manifest.Targets(2).CoverageResult);
+delete(manifest.Targets(2).ReportHTML);
+manifest.Targets(2).ExecutionStatus = 'EXCEPT';
+manifest.Targets(2).PackageStatus = 'FAIL';
+manifest.Targets(2).PackagedCVF = '';
+manifest.Targets(2).CoverageResult = '';
+manifest.Targets(2).ReportHTML = '';
+manifest.Targets(2).ModelCleanupStatus = 'FAIL';
+manifest.Actions.EXECUTE.Status = 'WARN';
+manifest.Actions.PACKAGE.Status = 'WARN';
+manifest.Actions.SUMMARY.Status = 'WARN';
+manifest.Status = 'PARTIAL';
+st_write_standalone_pipeline_manifest(root, manifest);
+evalc('[code, ~, details] = st_check_standalone_coverage(''OutputRoot'', root);');
+verifyNotEqual(testCase, code, '1111111111');
+verifyEqual(testCase, char(details.B10(2)), '0');
+end
+
+function testUnexplainedFailureStillBreaksTheContract(testCase)
+% The EXCEPT allowance must not let a real packaging defect through.
+[root, manifest] = complete_fixture(testCase, 2);
+delete(manifest.Targets(2).CoverageResult);
+manifest.Targets(2).ExecutionStatus = 'FAIL';
+manifest.Actions.PACKAGE.Status = 'WARN';
+manifest.Status = 'PARTIAL';
+st_write_standalone_pipeline_manifest(root, manifest);
+evalc('[code, summary] = st_check_standalone_coverage(''OutputRoot'', root);');
+verifyNotEqual(testCase, code, '1111111111');
+verifyEqual(testCase, summary.Status, 'FAIL');
 end

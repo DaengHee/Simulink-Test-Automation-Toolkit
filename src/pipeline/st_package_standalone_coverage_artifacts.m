@@ -23,7 +23,7 @@ manifest = package_test_file(manifest, pipelineRoot, cfg);
 for i = 1:numel(manifest.Targets)
     item = manifest.Targets(i);
     folderName = sprintf('%03d_%s', round(double(item.No)), ...
-        st_export_safe_name(item.CUTName));
+        st_artifact_stem(item.TestCaseName));
     targetDirectory = fullfile(pipelineRoot, folderName);
     if ~isfolder(targetDirectory), mkdir(targetDirectory); end
     item.OutputDirectory = targetDirectory;
@@ -33,7 +33,17 @@ for i = 1:numel(manifest.Targets)
         '[PACKAGE %d/%d] start | CUT=%s', ...
         i, numel(manifest.Targets), item.CUTName);
     try
-        if strcmpi(item.ExecutionStatus, 'FAIL')
+        % Preserve the standalone harness and its local input even when
+        % this target's Test Manager execution ended in an exception.
+        item = package_execution_inputs(item, targetDirectory, cfg);
+        st_log(cfg, 'INFO', ...
+            '[PACKAGE %d/%d] standalone inputs preserved | CUT=%s', ...
+            i, numel(manifest.Targets), item.CUTName);
+        executionStatus = upper(string(item.ExecutionStatus));
+        if executionStatus == "EXCEPT"
+            error('simtest:StandalonePipelineExecuteTargetException', ...
+                'EXECUTE ended with an exception; coverage artifacts are unavailable.');
+        elseif executionStatus == "FAIL"
             error('simtest:StandalonePipelineExecuteTargetFailed', ...
                 'EXECUTE did not satisfy the target lifecycle contract.');
         end
@@ -60,6 +70,7 @@ for i = 1:numel(manifest.Targets)
 end
 
 status = target_action_status(manifest.Targets, 'PackageStatus');
+manifest.PackageInventory = st_package_inventory(manifest);
 manifest.Actions.PACKAGE = action_state(status, ...
     'Model, Input, CVF, CVT, and one HTML report packaged per target');
 manifest.Status = pipeline_status(manifest);
@@ -158,14 +169,13 @@ st_log(cfg, 'INFO', ...
 end
 
 function item = package_target(item, resultObj, targetDirectory, cfg) %#ok<INUSD>
-item = package_execution_inputs(item, targetDirectory, cfg);
 sourceCVF = item.ExecutionCVFPath;
 if ~isfile(sourceCVF)
     error('simtest:StandalonePipelineCVFMissing', ...
         'Generated CVF is missing: %s', sourceCVF);
 end
 finalCVF = fullfile(targetDirectory, ...
-    [st_export_safe_name(item.CUTName) '_CoverageFilter.cvf']);
+    [st_artifact_stem(item.TestCaseName) '.cvf']);
 copy_checked(sourceCVF, finalCVF);
 item.PackagedCVF = finalCVF;
 item.PackagedCVFSHA256 = st_file_signature(finalCVF).SHA256;
@@ -200,7 +210,7 @@ try
         'simtest:StandalonePipelinePackageCoverageInvalid');
 
     cvtPath = fullfile(targetDirectory, ...
-        [st_export_safe_name(item.CUTName) '_CoverageResult.cvt']);
+        [st_artifact_stem(item.TestCaseName) '.cvt']);
     delete_if_present(cvtPath);
     st_log(cfg, 'INFO', ...
         'PACKAGE captured coverage data promotion start | CUT=%s', item.CUTName);
@@ -210,14 +220,24 @@ try
     st_log(cfg, 'INFO', ...
         'PACKAGE captured coverage data promotion complete | CUT=%s', item.CUTName);
 
-    reportDirectory = fullfile(targetDirectory, ...
-        [st_export_safe_name(item.CUTName) '_CoverageReport']);
-    if isfolder(reportDirectory), rmdir(reportDirectory, 's'); end
-    mkdir(reportDirectory);
+    % Keep report.html at the target root. cvhtml's companion assets must
+    % remain beside it, otherwise the official report cannot be rendered.
+    reportDirectory = targetDirectory;
     unzip(reportZip, reportDirectory);
     ensure_report_html(reportDirectory);
+    reportHTML = fullfile(reportDirectory, ...
+        [st_artifact_stem(item.TestCaseName) '.html']);
+    rootReport = fullfile(reportDirectory, 'report.html');
+    if ~strcmpi(rootReport, reportHTML)
+        [moved, moveMessage] = movefile(rootReport, reportHTML, 'f');
+        if ~moved
+            error('simtest:StandalonePipelinePackageReportRenameFailed', ...
+                'Cannot rename report %s to %s: %s', ...
+                rootReport, reportHTML, moveMessage);
+        end
+    end
     item.TestReport = reportDirectory;
-    item.ReportHTML = fullfile(reportDirectory, 'report.html');
+    item.ReportHTML = reportHTML;
 
     item = assign_metric(item, evidence.Decision, 'Decision');
     item = assign_metric(item, evidence.Execution, 'Execution');
@@ -396,7 +416,7 @@ end
 end
 
 function require_action(manifest, name)
-if double(manifest.Version) ~= 2 || ~isfield(manifest, 'Actions') || ...
+if ~ismember(double(manifest.Version), [2 3]) || ~isfield(manifest, 'Actions') || ...
         ~isfield(manifest.Actions, name) || ...
         ~ismember(upper(string(manifest.Actions.(name).Status)), ["OK","WARN"])
     error('simtest:StandalonePipelineActionNotReady', ...
@@ -471,7 +491,7 @@ end
 
 function status = target_action_status(targets, field)
 values = upper(string({targets.(field)}));
-if any(values == "FAIL" | values == "SKIP")
+if any(values == "FAIL" | values == "EXCEPT" | values == "SKIP")
     status = 'WARN';
 else
     status = 'OK';

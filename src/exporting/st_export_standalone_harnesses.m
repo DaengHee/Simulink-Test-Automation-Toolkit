@@ -87,6 +87,12 @@ if ~same_path(loadedTemporaryFile, temporaryModelFile)
          'model file: %s'], loadedTemporaryFile);
 end
 
+% Simulink repeats the same model-level warning on every save in the loop
+% below, which buries the per-target progress. Suppress only what the
+% project configured, report it once, and restore on the way out.
+warningCleanup = st_suppress_warnings( ...
+    logConfig, 'STANDALONE_HARNESS_EXPORT'); %#ok<NASGU>
+
 keys = strings(0,1);
 keyPaths = strings(0,1);
 keyDetails = repmat(empty_detail(), 0, 1);
@@ -99,6 +105,11 @@ for i = 1:height(targets)
     if ~isempty(existing)
         bundlePaths(i) = keyPaths(existing);
         details(i) = keyDetails(existing);
+        fprintf('[%d/%d] REUSE %s | Harness=%s\n', ...
+            i, height(targets), sourceOwner, harnessName);
+        log_message(logConfig, 'INFO', ...
+            '[StandaloneHarness %d/%d] reused | Source=%s | Harness=%s', ...
+            i, height(targets), sourceOwner, harnessName);
         continue;
     end
 
@@ -111,6 +122,16 @@ for i = 1:height(targets)
             sourceOwner, harnessName);
     end
 
+    % Each target re-saves the whole source copy and runs a Harness export.
+    % Both are minutes-long on a large model, so report progress per target
+    % and per call instead of leaving the console silent.
+    targetTimer = tic;
+    fprintf('[%d/%d] START %s | Harness=%s\n', ...
+        i, height(targets), sourceOwner, harnessName);
+    log_message(logConfig, 'INFO', ...
+        '[StandaloneHarness %d/%d] start | Source=%s | Harness=%s', ...
+        i, height(targets), sourceOwner, harnessName);
+
     outputFolder = fullfile(destination, target_folder(targets(i,:)));
     if ~isfolder(outputFolder), mkdir(outputFolder); end
     outputModel = standalone_model_name(harnessName);
@@ -120,28 +141,18 @@ for i = 1:height(targets)
     folderCleanup = onCleanup(@() cd(previousFolder)); %#ok<NASGU>
     cd(outputFolder);
     try
-        % sltest.harness.export dirties the copied top model as a side
-        % effect. Re-saving that unchanged content on a later iteration --
-        % byte-identical to what save_system already wrote -- eventually
-        % fails with Simulink:LoadSave:PartAlreadyWritten on a Harness's
-        % ModelWorkspace part, reproducible even right after a full MATLAB
-        % restart. Nothing in this loop needs that dirtied in-memory state
-        % kept, so discard it by reloading the on-disk copy.
-        if strcmp(get_param(temporaryModel, 'Dirty'), 'on')
-            close_system(temporaryModel, 0);
-            load_system(temporaryModelFile);
-            reloadedFile = char(get_param(temporaryModel, 'FileName'));
-            if ~same_path(reloadedFile, temporaryModelFile)
-                error('simtest:AssetTempModelLoadMismatch', ...
-                    ['Refusing Harness export because MATLAB reloaded a ' ...
-                     'different model file: %s'], reloadedFile);
-            end
-        end
+        stepTimer = tic;
+        save_system(temporaryModel);
+        report_step(logConfig, 'save source copy', stepTimer);
+        stepTimer = tic;
         sltest.harness.export( ...
             sourceOwner, harnessName, 'Name', outputModel);
+        report_step(logConfig, 'harness export', stepTimer);
         if bdIsLoaded(outputModel)
+            stepTimer = tic;
             save_system(outputModel, outputPath);
             close_system(outputModel, 0);
+            report_step(logConfig, 'save standalone model', stepTimer);
         end
         if ~isfile(outputPath)
             error('simtest:AssetHarnessExportMissing', ...
@@ -166,11 +177,13 @@ for i = 1:height(targets)
         'StandaloneModelFile', relative, ...
         'StandaloneCUTPath', standaloneCutPath);
     keyDetails(end+1,1) = details(i); %#ok<AGROW>
-    log_message(logConfig, 'DEBUG', ...
+    fprintf('[%d/%d] DONE  %s | %.1f sec\n', ...
+        i, height(targets), outputModel, toc(targetTimer));
+    log_message(logConfig, 'INFO', ...
         ['[StandaloneHarness %d/%d] exported | Source=%s | ' ...
-         'Harness=%s | Model=%s | CUT=%s'], ...
+         'Harness=%s | Model=%s | CUT=%s | elapsed=%.3f sec'], ...
         i, height(targets), sourceOwner, harnessName, ...
-        outputModel, standaloneCutPath);
+        outputModel, standaloneCutPath, toc(targetTimer));
 end
 clear sessionCleanup;
 log_message(logConfig, 'INFO', ...
@@ -248,8 +261,8 @@ end
 function path = identify_standalone_cut(sourceOwner, standaloneModel)
 sourceName = get_param(sourceOwner, 'Name');
 sourceSignature = interface_signature(sourceOwner);
-candidates = find_system(standaloneModel, ...
-    'SearchDepth', 1, 'Type', 'Block');
+candidates = find_system(standaloneModel, 'SearchDepth', 1, ...
+    'FollowLinks', 'on', 'LookUnderMasks', 'all', 'Type', 'Block');
 candidates = cellstr(string(candidates(:)));
 candidates = candidates(~strcmp(candidates, standaloneModel));
 matches = strings(0,1);
@@ -264,14 +277,21 @@ end
 if numel(matches) ~= 1
     error('simtest:StandaloneCUTIdentificationFailed', ...
         ['Expected exactly one exported CUT matching name and interface. ' ...
-         'Source=%s | Model=%s | Matches=%d'], ...
-        sourceOwner, standaloneModel, numel(matches));
+         'Source=%s | Model=%s | Matches=%d | Candidates=%s'], ...
+        sourceOwner, standaloneModel, numel(matches), ...
+        candidate_digest(candidates));
 end
 path = char(matches(1));
 end
 
 function signature = interface_signature(block)
-ports = find_system(block, 'SearchDepth', 1, 'Type', 'Block');
+% A library-linked CUT hides its content behind the link: find_system's
+% default 'FollowLinks','off' stops at the link boundary and reports no
+% ports at all. sltest.harness.export copies the CUT out of that link, so
+% the exported block reports its real ports and the two signatures can
+% never match unless both sides resolve links and masks the same way.
+ports = find_system(block, 'SearchDepth', 1, ...
+    'FollowLinks', 'on', 'LookUnderMasks', 'all', 'Type', 'Block');
 ports = cellstr(string(ports(:)));
 ports = ports(~strcmp(ports, block));
 rows = strings(0,1);
@@ -287,6 +307,36 @@ for i = 1:numel(ports)
         string(portNumber) + "|" + string(get_param(ports{i}, 'Name')); %#ok<AGROW>
 end
 signature = sort(rows);
+end
+
+function text = candidate_digest(candidates)
+% Name-only failures and interface-only failures look identical in the
+% error message otherwise.
+if isempty(candidates), text = '<none>'; return; end
+limit = min(numel(candidates), 10);
+parts = strings(0,1);
+for i = 1:limit
+    linkStatus = '';
+    try
+        linkStatus = char(string(get_param(candidates{i}, ...
+            'StaticLinkStatus')));
+    catch
+    end
+    parts(end+1,1) = string(get_param(candidates{i}, 'Name')) + ...
+        "(" + string(get_param(candidates{i}, 'BlockType')) + ...
+        "/" + string(linkStatus) + ")"; %#ok<AGROW>
+end
+if numel(candidates) > limit
+    parts(end+1,1) = "...+" + string(numel(candidates) - limit);
+end
+text = char(strjoin(parts, ', '));
+end
+
+function report_step(logConfig, label, timerValue)
+elapsed = toc(timerValue);
+fprintf('       %-22s %7.1f sec\n', label, elapsed);
+log_message(logConfig, 'DEBUG', ...
+    'Standalone Harness step | Step=%s | elapsed=%.3f sec', label, elapsed);
 end
 
 function value = empty_detail()

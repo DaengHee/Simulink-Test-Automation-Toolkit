@@ -17,7 +17,7 @@ verifyTrue(testCase, contains(text, ...
     "'ResultFilterMode', 'POST_RUN_REQUIRED'"));
 verifyTrue(testCase, contains(text, ...
     "st_require_runtime_target('LoadModel', false)"));
-verifyTrue(testCase, contains(text, "'Version', 2"));
+verifyTrue(testCase, contains(text, "'Version', 3"));
 verifyTrue(testCase, contains(text, "'Actions', struct("));
 verifyTrue(testCase, contains(text, "'Inputs', {input_inventory(cfg)}"));
 verifyTrue(testCase, contains(text, ...
@@ -216,6 +216,10 @@ verifyTrue(testCase, contains(launcher, ...
     'load_system(modelFile)'));
 verifyTrue(testCase, contains(launcher, ...
     'coverage.CoverageFilterFilename = filterFile'));
+verifyTrue(testCase, contains(launcher, ...
+    'filter_readback_matches(filterFile, actual)'));
+verifyTrue(testCase, contains(launcher, ...
+    'Coverage filter applied | TestCase=%s | Filter=%s'));
 verifyTrue(testCase, contains(launcher, 'sltest.testmanager.view'));
 verifyTrue(testCase, contains(checker, 'TestManagerLauncherSHA256'));
 rewireAt = strfind(package, 'function item = rewire_packaged_input');
@@ -226,6 +230,65 @@ rewireCleanupAt = strfind(package, ...
 rewireIsolationAt = rewireIsolationAt( ...
     rewireIsolationAt > rewireAt(1));
 verifyLessThan(testCase, rewireIsolationAt(1), rewireCleanupAt(1));
+end
+
+function testPackageUsesTestCaseNamesAndPlacesHtmlAtTargetRoot(testCase)
+package = source('pipeline', ...
+    'st_package_standalone_coverage_artifacts.m');
+perCut = source('execution', 'st_run_tests_per_cut.m');
+verifyTrue(testCase, contains(package, ...
+    "st_artifact_stem(item.TestCaseName)"));
+verifyFalse(testCase, contains(package, ...
+    "st_export_safe_name(item.CUTName)"));
+verifyTrue(testCase, contains(package, ...
+    'reportDirectory = targetDirectory'));
+verifyTrue(testCase, contains(package, ...
+    "[st_artifact_stem(item.TestCaseName) '.html']"));
+verifyTrue(testCase, contains(package, ...
+    "[st_artifact_stem(item.TestCaseName) '.cvf']"));
+verifyTrue(testCase, contains(package, ...
+    "[st_artifact_stem(item.TestCaseName) '.cvt']"));
+verifyTrue(testCase, contains(package, 'movefile(rootReport, reportHTML'));
+verifyFalse(testCase, contains(package, "'_CoverageReport'"));
+verifyTrue(testCase, contains(perCut, ...
+    'bind_report_filter_display_name(coverageObjects, row, coverageFilterPath'));
+verifyTrue(testCase, contains(perCut, ...
+    "displayFilter = [st_artifact_stem(char(string(row.TestCaseName))) '.cvf']"));
+verifyTrue(testCase, contains(perCut, 'coverageObjects{1}.filter = displayFilter'));
+end
+
+function testFailedExecutionStillPreservesStandaloneInputs(testCase)
+package = source('pipeline', ...
+    'st_package_standalone_coverage_artifacts.m');
+inputAt = strfind(package, ...
+    'item = package_execution_inputs(item, targetDirectory, cfg);');
+executionFailureAt = strfind(package, ...
+    'if executionStatus == "EXCEPT"');
+verifyEqual(testCase, numel(inputAt), 1);
+verifyNotEmpty(testCase, executionFailureAt);
+verifyLessThan(testCase, inputAt(1), executionFailureAt(1));
+verifyTrue(testCase, contains(package, ...
+    'standalone inputs preserved | CUT=%s'));
+verifyTrue(testCase, contains(package, ...
+    'StandalonePipelineExecuteTargetException'));
+controller = source('pipeline', 'st_run_standalone_coverage_pipeline.m');
+verifyTrue(testCase, contains(controller, ...
+    'if reportedExecutionStatus == "EXCEPT"'));
+verifyTrue(testCase, contains(controller, ...
+    'values == "FAIL" | values == "EXCEPT" | values == "SKIP"'));
+end
+
+function testReportFilterHelpersAreFileLevelSubfunctions(testCase)
+% Nested helpers stay invisible to the report subfunctions that bind the
+% display CVF and restore the validated absolute binding, so
+% capture_package_evidence must close before them.
+perCut = source('execution', 'st_run_tests_per_cut.m');
+verifyNotEmpty(testCase, regexp(perCut, ...
+    'rethrow\(ME\);\s*end\s*end\s*function apply_package_report_filter', ...
+    'once'));
+calls = strfind(perCut, ...
+    'apply_package_report_filter(coverageObjects, row, coverageFilterPath, cfg);');
+verifyEqual(testCase, numel(calls), 2);
 end
 
 function testCoverageWithoutObjectivesUsesValidZeroDenominatorMetric(testCase)
@@ -244,13 +307,17 @@ verifyTrue(testCase, contains(prepare, "contains(metricSettings, 'd')"));
 verifyFalse(testCase, contains(prepare, "contains(metricSettings, 'e')"));
 end
 
-function testSummaryUsesExactSevenColumns(testCase)
+function testSummaryUsesDecisionAndExecutionCounts(testCase)
 text = source('pipeline', ...
     'st_export_standalone_coverage_summary.m');
 verifyTrue(testCase, contains(text, ...
     "{'NUM','CUT_NAME','CUT_PATH','Test Case Name','Harness Name', ..."));
 verifyTrue(testCase, contains(text, ...
-    "'Decision (%)','Execution (%)'"));
+    "'Decision Executed','Decision Total','Decision (%)', ..."));
+verifyTrue(testCase, contains(text, ...
+    "'Execution Executed','Execution Total','Execution (%)'"));
+verifyTrue(testCase, contains(text, 'DecisionExecuted(i) = scalar_metric(item.DecisionCovered)'));
+verifyTrue(testCase, contains(text, 'ExecutionExecuted(i) = scalar_metric(item.ExecutionCovered)'));
 verifyFalse(testCase, contains(text, 'MetricSnapshot'));
 verifyFalse(testCase, contains(text, 'load('));
 [percentage, percentageText] = st_coverage_percentage(0, 0);
@@ -286,4 +353,14 @@ end
 
 function text = source(folder, file)
 text = string(fileread(fullfile(st_project_root(), 'src', folder, file)));
+end
+
+function testInternalBundleSkipsProductAnalysis(testCase)
+% The pipeline bundle is an execution vehicle under workRoot, not a
+% delivery, so it should not pay for the toolbox dependency analysis.
+controller = source('pipeline', 'st_run_standalone_coverage_pipeline.m');
+verifyTrue(testCase, contains(controller, "'CreateArchive', false, ..."));
+verifyTrue(testCase, contains(controller, "'AnalyzeProducts', false, ..."));
+snapshot = source('verification', 'st_create_verification_snapshot.m');
+verifyTrue(testCase, contains(snapshot, "'AnalyzeProducts', false, ..."));
 end

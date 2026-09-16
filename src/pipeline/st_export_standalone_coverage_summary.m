@@ -20,7 +20,11 @@ CUT_NAME = strings(n,1);
 CUT_PATH = strings(n,1);
 TestCaseName = strings(n,1);
 HarnessName = strings(n,1);
+DecisionExecuted = NaN(n,1);
+DecisionTotal = NaN(n,1);
 Decision = strings(n,1);
+ExecutionExecuted = NaN(n,1);
+ExecutionTotal = NaN(n,1);
 Execution = strings(n,1);
 for i = 1:n
     item = manifest.Targets(i);
@@ -29,7 +33,11 @@ for i = 1:n
     CUT_PATH(i) = string(item.CUTPath);
     TestCaseName(i) = string(item.TestCaseName);
     HarnessName(i) = string(item.HarnessName);
+    DecisionExecuted(i) = scalar_metric(item.DecisionCovered);
+    DecisionTotal(i) = scalar_metric(item.DecisionTotal);
     Decision(i) = string(item.DecisionPercentageText);
+    ExecutionExecuted(i) = scalar_metric(item.ExecutionCovered);
+    ExecutionTotal(i) = scalar_metric(item.ExecutionTotal);
     Execution(i) = string(item.ExecutionPercentageText);
     if strcmpi(item.PackageStatus, 'OK')
         manifest.Targets(i).SummaryStatus = 'OK';
@@ -39,9 +47,11 @@ for i = 1:n
 end
 
 summary = table(NUM, CUT_NAME, CUT_PATH, TestCaseName, HarnessName, ...
-    Decision, Execution, 'VariableNames', ...
+    DecisionExecuted, DecisionTotal, Decision, ...
+    ExecutionExecuted, ExecutionTotal, Execution, 'VariableNames', ...
     {'NUM','CUT_NAME','CUT_PATH','Test Case Name','Harness Name', ...
-    'Decision (%)','Execution (%)'});
+    'Decision Executed','Decision Total','Decision (%)', ...
+    'Execution Executed','Execution Total','Execution (%)'});
 summaryPath = fullfile(pipelineRoot, 'CoverageSummary.xlsx');
 st_log(cfg, 'DEBUG', ...
     'SUMMARY Excel write start | Path=%s', summaryPath);
@@ -58,6 +68,11 @@ manifest.UpdatedAt = timestamp_text();
 st_log(cfg, 'INFO', ...
     'Standalone coverage SUMMARY complete | Rows=%d | elapsed=%.3f sec', ...
     n, toc(timerValue));
+end
+
+function value = scalar_metric(raw)
+value = NaN;
+if isnumeric(raw) && isscalar(raw), value = double(raw); end
 end
 
 function write_excel_atomic(path, summary, manifest)
@@ -80,7 +95,7 @@ end
 end
 
 function require_package(manifest)
-if double(manifest.Version) ~= 2 || ~isfield(manifest, 'Actions') || ...
+if ~ismember(double(manifest.Version), [2 3]) || ~isfield(manifest, 'Actions') || ...
         ~isfield(manifest.Actions, 'PACKAGE') || ...
         ~ismember(upper(string(manifest.Actions.PACKAGE.Status)), ["OK","WARN"])
     error('simtest:StandalonePipelineActionNotReady', ...

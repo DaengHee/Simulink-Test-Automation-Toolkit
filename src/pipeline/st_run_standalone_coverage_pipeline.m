@@ -206,11 +206,15 @@ manifest.Actions.EXECUTE = action_state('RUNNING', ...
 st_write_standalone_pipeline_manifest(outputRoot, manifest);
 
 try
+    % This bundle is an internal execution vehicle, not a delivery: it is
+    % built under workRoot and nobody reads its README. Skip the toolbox
+    % analysis for the same reason the archive is skipped.
     bundle = st_export_test_bundle( ...
         'Destination', workRoot, ...
         'Profile', 'REPRODUCIBLE', ...
         'ExecutionModelMode', 'STANDALONE_HARNESS', ...
         'CreateArchive', false, ...
+        'AnalyzeProducts', false, ...
         'IncludeReferenceReport', false);
     assert_pipeline_source_unloaded(cfg, 'before bundle runner');
     manifest.BundleDirectory = bundle.BundleDirectory;
@@ -234,6 +238,19 @@ try
         manifest.PerCutRunDirectory, pipelineRoot);
     manifest.TestManagerWorkFile = execution.TestFile;
     manifest.Targets = build_target_state(bundle.Manifest, execution);
+    replayFiles = {manifest.TestManagerWorkFile};
+    for i = 1:numel(manifest.Targets)
+        replayFiles{end+1} = manifest.Targets(i).StandaloneModelFile; %#ok<AGROW>
+        if ~isempty(manifest.Targets(i).SignalEditorInput)
+            replayFiles{end+1} = manifest.Targets(i).SignalEditorInput; %#ok<AGROW>
+        end
+    end
+    manifest.ReplayInputs = repmat(struct('Path','','SHA256',''),0,1);
+    for i = 1:numel(replayFiles)
+        if any(arrayfun(@(entry) st_same_path(entry.Path,replayFiles{i}),manifest.ReplayInputs)), continue; end
+        signature = st_file_signature(replayFiles{i});
+        manifest.ReplayInputs(end+1,1) = struct('Path',replayFiles{i},'SHA256',signature.SHA256);
+    end
     manifest.BundleSessionCleanup = execution.SessionCleanup;
     manifest.RunnerEnvironmentCleanupStatus = ...
         runtimeContext.RunnerEnvironmentCleanupStatus;
@@ -382,6 +399,7 @@ for i = 1:n
     item.PackageEvidenceStatus = char(string(row.PackageEvidenceStatus));
     item.ExecutionStatus = char(string(row.Status));
     item.Message = char(string(row.Message));
+    reportedExecutionStatus = upper(string(item.ExecutionStatus));
     if item.RunCount ~= 1 || item.RerunPerformed || ...
             item.ResultFilterAttachCount ~= 1 || ...
             ~strcmp(item.CVFGenerationStatus, 'OK') || ...
@@ -390,7 +408,11 @@ for i = 1:n
             ~strcmp(item.ModelCleanupStatus, 'OK') || ...
             ~strcmp(item.PathCleanupStatus, 'OK') || ...
             ~strcmp(item.PackageEvidenceStatus, 'OK')
-        item.ExecutionStatus = 'FAIL';
+        if reportedExecutionStatus == "EXCEPT"
+            item.ExecutionStatus = 'EXCEPT';
+        else
+            item.ExecutionStatus = 'FAIL';
+        end
         item.Message = append_message(item.Message, ...
             'Standalone lifecycle contract did not pass');
     end
@@ -657,7 +679,7 @@ end
 
 function manifest = initial_manifest(id, root, source, options, saveTestResult)
 manifest = struct( ...
-    'Version', 2, 'PipelineId', id, 'PipelineRoot', root, ...
+    'Version', 3, 'PipelineId', id, 'PipelineRoot', root, ...
     'Action', 'EXECUTE', 'Status', 'RUNNING', ...
     'CreatedAt', timestamp_text(), 'UpdatedAt', timestamp_text(), ...
     'SaveTestResult', logical(saveTestResult), ...
@@ -752,7 +774,7 @@ end
 
 function status = target_action_status(targets, field)
 values = upper(string({targets.(field)}));
-if any(values == "FAIL" | values == "SKIP")
+if any(values == "FAIL" | values == "EXCEPT" | values == "SKIP")
     status = 'WARN';
 else
     status = 'OK';

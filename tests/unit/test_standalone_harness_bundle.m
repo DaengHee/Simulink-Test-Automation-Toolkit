@@ -34,6 +34,24 @@ verifyTrue(testCase, contains(source, ...
     "folder = sprintf('%04d_%s', round(double(row.No)), safeName)"));
 end
 
+function testCUTIdentificationResolvesLibraryLinks(testCase)
+% A library-linked CUT reports no ports with find_system's defaults, while
+% the exported copy left that link behind and reports its real ports. Both
+% sides must resolve links and masks or the interface can never match.
+root = st_project_root();
+source = fileread(fullfile(root, 'src', 'exporting', ...
+    'st_export_standalone_harnesses.m'));
+verifyEqual(testCase, numel(strfind(source, ...
+    "'FollowLinks', 'on', 'LookUnderMasks', 'all', 'Type', 'Block'")), 2);
+verifyFalse(testCase, contains(source, ...
+    "find_system(block, 'SearchDepth', 1, 'Type', 'Block')"));
+verifyFalse(testCase, contains(source, ...
+    "find_system(standaloneModel, ...
+    'SearchDepth', 1, 'Type', 'Block')"));
+verifyTrue(testCase, contains(source, 'candidate_digest(candidates)'));
+verifyTrue(testCase, contains(source, "'StaticLinkStatus'"));
+end
+
 function testRunnerRewiresAndUsesSequentialPath(testCase)
 root = st_project_root();
 runner = fileread(fullfile(root, 'resources', 'export_bundle', ...
@@ -43,6 +61,7 @@ prepare = fileread(fullfile(root, 'src', 'execution', ...
 verifyTrue(testCase, contains(runner, ...
     "strcmp(executionModelMode, 'STANDALONE_HARNESS')"));
 verifyTrue(testCase, contains(runner, 'st_run_tests_per_cut('));
+verifyTrue(testCase, contains(runner, "'LoadRuntimeModel', false"));
 verifyTrue(testCase, contains(runner, ...
     "'RunRootDirectory', fullfile(executionRoot, 'r')"));
 verifyTrue(testCase, contains(prepare, "'HarnessOwner', ''"));
@@ -57,6 +76,13 @@ verifyTrue(testCase, contains(prepare, ...
     'StandaloneIterationChanged'));
 verifyTrue(testCase, contains(prepare, ...
     'configure_standalone_coverage(tf, suite, tc, cfg)'));
+verifyTrue(testCase, contains(prepare, ...
+    "st_require_runtime_target('LoadModel', false)"));
+perCut = fileread(fullfile(root, 'src', 'execution', ...
+    'st_run_tests_per_cut.m'));
+verifyTrue(testCase, contains(perCut, "addParameter(p, 'LoadRuntimeModel', true"));
+verifyTrue(testCase, contains(perCut, ...
+    "st_require_runtime_target('LoadModel', loadRuntimeModel)"));
 verifyTrue(testCase, contains(prepare, ...
     'caseCoverage.RecordCoverage = true'));
 verifyTrue(testCase, contains(prepare, ...
@@ -183,30 +209,21 @@ verifyTrue(testCase, contains(prepare, ...
     'targets.ExpectedUpdateMode(:) = "OFF"'));
 end
 
-
-function testTopModelDirtyStateIsDiscardedNotResaved(testCase)
-% sltest.harness.export dirties the copied top model as a side effect.
-% Re-saving that unchanged content on a later target eventually fails with
-% Simulink:LoadSave:PartAlreadyWritten on a Harness's ModelWorkspace part
-% -- reproducible even immediately after a full MATLAB restart -- because
-% it is byte-identical to what save_system already wrote. The dirtied
-% in-memory state must be discarded by reloading the on-disk copy instead.
+function testStandaloneExportReportsPerTargetProgress(testCase)
+% One target re-saves the whole source copy and runs a Harness export, both
+% minutes long on a large model. The loop printed nothing until it finished.
 root = st_project_root();
 source = fileread(fullfile(root, 'src', 'exporting', ...
     'st_export_standalone_harnesses.m'));
-guardAt = strfind(source, ...
-    "if strcmp(get_param(temporaryModel, 'Dirty'), 'on')");
-closeAt = strfind(source, 'close_system(temporaryModel, 0);');
-loadAt = strfind(source, 'load_system(temporaryModelFile);');
-exportAt = strfind(source, 'sltest.harness.export( ...');
-verifyNotEmpty(testCase, guardAt);
-verifyNotEmpty(testCase, closeAt);
-verifyNotEmpty(testCase, loadAt);
-verifyNotEmpty(testCase, exportAt);
-verifyLessThan(testCase, guardAt(1), closeAt(1));
-verifyLessThan(testCase, closeAt(1), loadAt(1));
-verifyLessThan(testCase, loadAt(1), exportAt(1));
-verifyFalse(testCase, contains(source, 'save_system(temporaryModel);'));
+verifyTrue(testCase, contains(source, "'[%d/%d] START %s | Harness=%s"));
+verifyTrue(testCase, contains(source, "'[%d/%d] DONE  %s | %.1f sec"));
+verifyTrue(testCase, contains(source, "'[%d/%d] REUSE %s | Harness=%s"));
 verifyTrue(testCase, contains(source, ...
-    "'Refusing Harness export because MATLAB reloaded a '"));
+    "report_step(logConfig, 'save source copy', stepTimer)"));
+verifyTrue(testCase, contains(source, ...
+    "report_step(logConfig, 'harness export', stepTimer)"));
+verifyTrue(testCase, contains(source, ...
+    "report_step(logConfig, 'save standalone model', stepTimer)"));
+verifyTrue(testCase, contains(source, ...
+    'Standalone Harness step | Step=%s | elapsed=%.3f sec'));
 end

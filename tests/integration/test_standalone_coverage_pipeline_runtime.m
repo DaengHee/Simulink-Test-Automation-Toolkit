@@ -78,6 +78,9 @@ runInfo = st_run_standalone_coverage_pipeline( ...
     'ContinueOnFailure', true, ...
     'FailOnNonPass', false);
 verifyTrue(testCase, isfile(runInfo.Manifest));
+bundleManifest = jsondecode(fileread(runInfo.BundleManifest));
+verifyEqual(testCase,string(bundleManifest.Policy.DependencyScope), ...
+    "STANDALONE_HARNESS_MODELS");
 verifyEqual(testCase, string(runInfo.Targets(1).ResultFilterStatus), "OK");
 verifyEqual(testCase, runInfo.Targets(1).RunCount, 1);
 verifyEqual(testCase, runInfo.Targets(1).ResultFilterAttachCount, 1);
@@ -141,6 +144,19 @@ end
 % a model with the same name is already loaded outside the bundle
 % (simtest:BundleModelAlreadyLoaded).
 verifyFalse(testCase, bdIsLoaded(testCase.TestData.TopModel));
+
+% Regeneration creates new histories without touching any source bytes.
+sourceState = file_state(fileparts(finalInfo.Manifest));
+derived = st_run_from_stage('Workflow','STANDALONE','FromStage','PACKAGE', ...
+    'SourcePipelineId',finalInfo.PipelineId);
+verifyNotEqual(testCase,derived.PipelineId,finalInfo.PipelineId);
+verifyEqual(testCase,derived.LocalExecutionCount,0);
+verifyEqual(testCase,file_state(fileparts(finalInfo.Manifest)),sourceState);
+verifyEqual(testCase,st_check_standalone_coverage('PipelineId',derived.PipelineId),'1111111111');
+summaryOnly = st_run_from_stage('Workflow','STANDALONE','FromStage','SUMMARY', ...
+    'SourcePipelineId',derived.PipelineId);
+verifyEqual(testCase,summaryOnly.LocalExecutionCount,0);
+verifyEqual(testCase,st_check_standalone_coverage('PipelineId',summaryOnly.PipelineId),'1111111111');
 end
 
 function testAllUsesLiveResultsWithoutResultRoundTrip(testCase)
