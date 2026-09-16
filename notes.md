@@ -1,44 +1,55 @@
 # 지금 할 일
 
-이전에 드린 "기본 실행" 명령에 **필수 준비 단계가 빠져 있었습니다.** External Harness
-경로 오류는 하네스가 깨진 게 아니라, 이 준비 단계 없이 바로 실행해서 생긴 것으로
-보입니다. 아래 순서로 다시 시도해주세요.
+지금까지 드린 `PreparationMode FORCE` 명령은 잘못됐습니다 — Harness/Signal
+Editor/Assessment를 이미 직접 다 설정해두셨다고 하셨는데, FORCE는 그 설정을
+새로 덮어씁니다. `docs/manual/standalone-run.md`에 있는, 이미 준비 끝난 상태
+전용 절차로 바꿉니다. FORCE는 전혀 안 씁니다.
 
-## 1단계: 기존 Harness 기준으로 준비 (먼저 실행)
+## 0단계: (아직 안 했으면) 원본 모델 저장하고 닫기
 
-Harness는 이미 모델에 만들어져 있으니 `st_run_from_harness`(Harness 생성부터 시작)
-말고 `st_run_after_harness`(기존 Harness부터 시작, Harness는 새로 안 만듦)를 씁니다.
+standalone 실행은 원본 Top Model과 같은 이름으로 격리된 복사본을 만들어서 돌립니다.
+그래서 원본 Top Model이 열려 있으면 안 됩니다. 지금 열려 있는 Harness/Top Model을
+저장하고 닫아주세요 (자동으로 안 닫힙니다).
 
-```matlab
-st_run_after_harness('PreparationMode', 'FORCE', 'ExecuteTests', false);
-```
-
-이 명령이 (Harness 생성은 건너뛰고) Signal Editor 입력·Assessment·Test Case를
-준비합니다. `st_run_standalone_coverage_pipeline`은 이 준비가 끝났다고 가정하고
-실행만 하므로, 이 단계 없이 바로 2단계로 가면 지금까지 본 것 같은 오류가 날 수
-있습니다.
-
-## 2단계: 실행 -> 패키징 -> 요약
+## 1단계: 준비 상태 확인 (읽기 전용)
 
 ```matlab
-info = st_run_standalone_coverage_pipeline();
-[code, summary, details] = st_check_standalone_coverage();
+st_setup
+[ready, checks] = st_check_readiness('Workflow','STANDALONE','FromStage','EXECUTE');
+disp(checks)
+assert(ready.Ready, 'Resolve readiness checks first.');
 ```
 
-전체 계약을 통과한 코드만 `1111111111`입니다. 화면 출력은 최대 20줄이며, 전체 CUT
-결과는 `details` table에서 확인합니다.
+`ready.Ready`가 false면 `checks`에 뭐가 문제인지 나옵니다 — 그거 먼저 캡처해서
+보여주세요. (모델을 여러 개 등록해서 profile로 쓰고 계신 게 아니면 이 단계는
+`st_select_model_profile` 없이 지금 쓰던 모델 그대로 씁니다.)
 
-1단계 이후에도 External Harness 오류가 또 나면 그때 다시 캡처해서 보여주세요 — 그때는
-진짜 하네스 쪽 문제로 봐야 합니다. 지금은 순서 문제일 가능성이 높으니 먼저 이걸로
-시도해주세요.
+## 2단계: EXECUTE부터 재개 (SLDV/Harness/Signal Editor/Assessment는 전혀 안 건드림)
+
+```matlab
+info = st_run_from_stage('Workflow','STANDALONE','FromStage','EXECUTE');
+[code, summary, details] = st_check_standalone_coverage('PipelineId', info.PipelineId);
+disp(code)
+disp(summary)
+disp(details)
+```
+
+전체 계약을 통과한 코드만 `1111111111`입니다. 결과 캡처해서 보여주세요.
 
 ## 결과를 Test Manager로 열고 싶으면
 
 ```matlab
 cfg = st_config();
-[m, ~] = st_load_standalone_pipeline_manifest( ...
-    cfg.StandaloneCoverageRootDir, info.PipelineId);
-run(m.TestManagerLauncher)
+m = st_load_standalone_pipeline_manifest(cfg.StandaloneCoverageRootDir, info.PipelineId);
+for k = 1:numel(m.Targets)
+    addpath(m.Targets(k).OutputDirectory);
+end
+sltest.testmanager.TestFile(m.TestManagerFile);
+sltest.testmanager.view;
 ```
 
-`info` 변수가 없으면(MATLAB 재시작 등) `info.PipelineId` 대신 `'LATEST'`를 넣으세요.
+또는 launcher로 한 번에:
+
+```matlab
+run(m.TestManagerLauncher)
+```
